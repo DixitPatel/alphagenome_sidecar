@@ -18,6 +18,7 @@ from alphagenome.models.v1 import dna_output
 from alphagenome.models.v1 import variant_scorers as variant_scorers_module
 from alphagenome.models.v1.variant_scorers import tidy_scores
 
+from app.logger import log_debug
 from app.schemas import ScoreRequest
 
 SEQUENCE_LENGTH_1MB = 1048576
@@ -77,7 +78,9 @@ def build_scorers() -> list:
 def create_client(api_key: str | None = None) -> dna_client.DnaClient:
     key = api_key or os.environ.get(API_KEY_ENV_VAR)
     if not key:
+        log_debug("PHASE 4: API KEY CHECK", f"{API_KEY_ENV_VAR} is NOT set in environment!")
         raise UpstreamUnavailableError(f"{API_KEY_ENV_VAR} is not configured")
+    log_debug("PHASE 4: API KEY CHECK", f"{API_KEY_ENV_VAR} is configured (prefix={key[:8]}..., length={len(key)})")
     return dna_client.create(key)
 
 
@@ -87,18 +90,58 @@ def score_with_client(
     """Run the full pipeline with an injected client (no env access)."""
     variant = build_variant(request)
     interval = build_interval(request.chromosome, request.position)
+    log_debug(
+        "PHASE 4: SIDECAR EXECUTION",
+        f"Built genome.Variant(chrom='{variant.chromosome}', pos={variant.position}, ref='{variant.reference_bases}', alt='{variant.alternate_bases}')",
+    )
+    log_debug(
+        "PHASE 4: SIDECAR EXECUTION",
+        f"Built 1 Mb interval: {interval.chromosome}:{interval.start}-{interval.end} (width={interval.end - interval.start})",
+    )
+    scorers = build_scorers()
+    log_debug(
+        "PHASE 4: SIDECAR EXECUTION",
+        f"Executing client.score_variant with {len(scorers)} scorers: [RNA_SEQ, SPLICE_SITES, SPLICE_SITE_USAGE, SPLICE_JUNCTIONS]...",
+    )
+
     try:
-        scores = client.score_variant(interval, variant, build_scorers())
-    except (RateLimitedError, UpstreamUnavailableError):
+        scores = client.score_variant(interval, variant, scorers)
+        log_debug(
+            "PHASE 4: SIDECAR EXECUTION",
+            f"client.score_variant returned {len(scores)} AnnData score objects",
+        )
+    except (RateLimitedError, UpstreamUnavailableError) as exc:
+        log_debug("PHASE 4: SIDECAR ERROR", f"Upstream error during score_variant: {exc}")
         raise
     except Exception as exc:
-        raise _map_client_error(exc) from exc
+        mapped = _map_client_error(exc)
+        log_debug("PHASE 4: SIDECAR ERROR", f"Exception during score_variant: {type(exc).__name__}: {exc} -> mapped to {type(mapped).__name__}")
+        raise mapped from exc
 
     tidy = tidy_scores(scores, match_gene_strand=True)
+    total_tidy_rows = len(tidy) if tidy is not None else 0
+    log_debug(
+        "PHASE 4: SIDECAR EXECUTION",
+        f"tidy_scores produced {total_tidy_rows} total rows across all genes in 1 Mb window",
+    )
+
     filtered = _filter_to_canonical_gene(
         tidy, request.canonical_gene_id, request.canonical_gene
     )
+    filtered_rows = len(filtered) if filtered is not None else 0
+    log_debug(
+        "PHASE 4: SIDECAR EXECUTION",
+        f"Filtered to canonical gene (gene_id='{request.canonical_gene_id}', name='{request.canonical_gene}'): "
+        f"{filtered_rows} matching rows retained out of {total_tidy_rows}",
+    )
+
     rows = [_row_to_dict(row) for _, row in filtered.iterrows()]
+    merged_splicing = _merged_splicing_score(filtered)
+    log_debug(
+        "PHASE 4: SIDECAR EXECUTION",
+        f"Computed merged splicing score: {merged_splicing}",
+    )
+
     return {
         "variant": request.variant,
         "hg38_variant": f"{request.chromosome}:{request.position}"
@@ -107,7 +150,7 @@ def score_with_client(
         "model_version": DEFAULT_MODEL_VERSION,
         "canonical_gene_id": request.canonical_gene_id,
         "canonical_gene": request.canonical_gene,
-        "merged_splicing_score": _merged_splicing_score(filtered),
+        "merged_splicing_score": merged_splicing,
         "scores": rows,
     }
 
