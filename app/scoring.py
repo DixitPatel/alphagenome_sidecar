@@ -1,8 +1,8 @@
 """AlphaGenome scoring pipeline for POST /score.
 
-Wraps ``dna_client.score_variant`` over a 1 Mb window with the four recommended
-scorers, runs ``tidy_scores`` locally, filters rows to the canonical gene, and
-assembles the ``alpha_genome`` payload from
+Wraps ``dna_client.score_variant`` over a parameterized window (default 1 Mb)
+with the four recommended scorers, runs ``tidy_scores`` locally, filters rows
+to the canonical gene, and assembles the ``alpha_genome`` payload from
 ``workstreams/contracts/alpha_genome_schema.json``.
 
 No literature handling lives here: the response carries no ``literature`` key.
@@ -22,7 +22,6 @@ from app.logger import log_debug
 from app.schemas import ScoreRequest
 
 SEQUENCE_LENGTH_1MB = 1048576
-HALF_WINDOW = SEQUENCE_LENGTH_1MB // 2
 DEFAULT_MODEL_VERSION = "alphagenome-v1"
 API_KEY_ENV_VAR = "ALPHA_GENOME_API_KEY"
 
@@ -50,29 +49,45 @@ def build_variant(request: ScoreRequest) -> genome.Variant:
     )
 
 
-def build_interval(chromosome: str, position: int) -> genome.Interval:
-    """1 Mb window centered on the variant, shifted right if it starts < 0."""
-    start = position - HALF_WINDOW
-    end = position + HALF_WINDOW
-    if start < 0:
-        end -= start
-        start = 0
-    return genome.Interval(chromosome, start, end)
+def build_interval(variant: genome.Variant, sequence_length: int = SEQUENCE_LENGTH_1MB) -> genome.Interval:
+    """Window of ``sequence_length`` centered on the variant.
+
+    Uses the SDK's ``reference_interval.resize`` idiom. NOTE: ``resize``
+    centers without clamping, so the start<0 right-shift guard is preserved
+    here: a telomeric variant with a wide window would otherwise send a
+    negative start to the API. Future iteration: replace the manual shift
+    with a chromosome-bounds-aware clamp once contig lengths are available
+    in the sidecar.
+    """
+    interval = variant.reference_interval.resize(sequence_length)
+    if interval.start < 0:
+        interval = genome.Interval(
+            interval.chromosome, 0, sequence_length
+        )
+    return interval
 
 
-def build_scorers() -> list:
-    return [
-        variant_scorers_module.GeneMaskLFCScorer(
-            requested_output=dna_output.OutputType.RNA_SEQ
-        ),
-        variant_scorers_module.GeneMaskSplicingScorer(
-            requested_output=dna_output.OutputType.SPLICE_SITES, width=None
-        ),
-        variant_scorers_module.GeneMaskSplicingScorer(
-            requested_output=dna_output.OutputType.SPLICE_SITE_USAGE, width=None
-        ),
-        variant_scorers_module.SpliceJunctionScorer(),
-    ]
+def build_scorers(names: list[str] | None = None) -> list:
+    if names is None:
+        return [
+            variant_scorers_module.GeneMaskLFCScorer(
+                requested_output=dna_output.OutputType.RNA_SEQ
+            ),
+            variant_scorers_module.GeneMaskSplicingScorer(
+                requested_output=dna_output.OutputType.SPLICE_SITES, width=None
+            ),
+            variant_scorers_module.GeneMaskSplicingScorer(
+                requested_output=dna_output.OutputType.SPLICE_SITE_USAGE, width=None
+            ),
+            variant_scorers_module.SpliceJunctionScorer(),
+        ]
+    scorers = []
+    for name in names:
+        try:
+            scorers.append(variant_scorers_module.RECOMMENDED_VARIANT_SCORERS[name])
+        except KeyError:
+            raise ValueError(f"Unknown scorer: {name}") from None
+    return scorers
 
 
 def create_client(api_key: str | None = None) -> dna_client.DnaClient:
@@ -89,19 +104,24 @@ def score_with_client(
 ) -> dict:
     """Run the full pipeline with an injected client (no env access)."""
     variant = build_variant(request)
-    interval = build_interval(request.chromosome, request.position)
+    interval = build_interval(variant, request.sequence_length)
     log_debug(
         "PHASE 4: SIDECAR EXECUTION",
         f"Built genome.Variant(chrom='{variant.chromosome}', pos={variant.position}, ref='{variant.reference_bases}', alt='{variant.alternate_bases}')",
     )
     log_debug(
         "PHASE 4: SIDECAR EXECUTION",
-        f"Built 1 Mb interval: {interval.chromosome}:{interval.start}-{interval.end} (width={interval.end - interval.start})",
+        f"Built interval: {interval.chromosome}:{interval.start}-{interval.end} (width={interval.end - interval.start})",
     )
-    scorers = build_scorers()
+    scorers = build_scorers(request.scorers)
+    scorer_names = (
+        ["RNA_SEQ", "SPLICE_SITES", "SPLICE_SITE_USAGE", "SPLICE_JUNCTIONS"]
+        if request.scorers is None
+        else list(request.scorers)
+    )
     log_debug(
         "PHASE 4: SIDECAR EXECUTION",
-        f"Executing client.score_variant with {len(scorers)} scorers: [RNA_SEQ, SPLICE_SITES, SPLICE_SITE_USAGE, SPLICE_JUNCTIONS]...",
+        f"Executing client.score_variant with {len(scorers)} scorers: {scorer_names}...",
     )
 
     try:
@@ -122,11 +142,14 @@ def score_with_client(
     total_tidy_rows = len(tidy) if tidy is not None else 0
     log_debug(
         "PHASE 4: SIDECAR EXECUTION",
-        f"tidy_scores produced {total_tidy_rows} total rows across all genes in 1 Mb window",
+        f"tidy_scores produced {total_tidy_rows} total rows across all genes in window",
     )
 
     filtered = _filter_to_canonical_gene(
-        tidy, request.canonical_gene_id, request.canonical_gene
+        tidy,
+        request.canonical_gene_id,
+        request.canonical_gene,
+        request.ontology_curies,
     )
     filtered_rows = len(filtered) if filtered is not None else 0
     log_debug(
@@ -156,7 +179,10 @@ def score_with_client(
 
 
 def _filter_to_canonical_gene(
-    tidy: pd.DataFrame | None, gene_id: str | None, gene_name: str
+    tidy: pd.DataFrame | None,
+    gene_id: str | None,
+    gene_name: str,
+    ontology_curies: list[str] | None = None,
 ) -> pd.DataFrame:
     if tidy is None or tidy.empty:
         return pd.DataFrame()
@@ -166,7 +192,12 @@ def _filter_to_canonical_gene(
         matches = (tidy["gene_id"] == gene_id) | matches_name
     else:
         matches = matches_name
-    return tidy[matches].reset_index(drop=True)
+    filtered = tidy[matches]
+    if ontology_curies:
+        tissue_matched = filtered["ontology_curie"].isin(ontology_curies)
+        tissue_agnostic = filtered["output_type"] == SPLICE_SITES
+        filtered = filtered[tissue_matched | tissue_agnostic]
+    return filtered.reset_index(drop=True)
 
 
 def _merged_splicing_score(filtered: pd.DataFrame) -> float | None:

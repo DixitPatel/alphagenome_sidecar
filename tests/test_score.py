@@ -222,7 +222,12 @@ def test_missing_api_key_fails_fast(monkeypatch):
 
 
 def test_interval_shifts_when_window_starts_below_zero():
-    interval = scoring.build_interval("chr1", 100)
+    from alphagenome.data import genome
+
+    variant = genome.Variant(
+        chromosome="chr1", position=100, reference_bases="A", alternate_bases="T"
+    )
+    interval = scoring.build_interval(variant)
     assert interval.start == 0
     assert interval.end == scoring.SEQUENCE_LENGTH_1MB
 
@@ -230,3 +235,92 @@ def test_interval_shifts_when_window_starts_below_zero():
 def test_scorers_cover_four_recommended_types():
     scorers = scoring.build_scorers()
     assert len(scorers) == 4
+
+
+def test_score_default_backward_compatible(monkeypatch, canned_tidy, braf_payload):
+    fake = make_client(monkeypatch, canned_tidy)
+    try:
+        response = TestClient(app).post("/score", json=braf_payload)
+    finally:
+        app.dependency_overrides.clear()
+    assert response.status_code == 200
+    body = response.json()
+    assert body["scored_interval"] == "chr7:140229048-141277624"
+    gene_names = {row["gene_name"] for row in body["scores"]}
+    assert gene_names == {"BRAF"}
+    assert {row["output_type"] for row in body["scores"]} == {
+        "RNA_SEQ",
+        "SPLICE_SITES",
+        "SPLICE_SITE_USAGE",
+        "SPLICE_JUNCTIONS",
+    }
+    interval, _, scorers = fake.calls[0]
+    assert interval.end - interval.start == 1048576
+    assert len(scorers) == 4
+
+
+def test_score_sequence_length(monkeypatch, canned_tidy, braf_payload):
+    fake = make_client(monkeypatch, canned_tidy)
+    braf_payload["sequence_length"] = 16384
+    try:
+        response = TestClient(app).post("/score", json=braf_payload)
+    finally:
+        app.dependency_overrides.clear()
+    assert response.status_code == 200
+    interval, _, _ = fake.calls[0]
+    assert interval.end - interval.start == 16384
+    assert response.json()["scored_interval"] == "chr7:140745144-140761528"
+
+
+def test_score_rejects_unsupported_sequence_length(braf_payload):
+    braf_payload["sequence_length"] = 1000
+    response = TestClient(app).post("/score", json=braf_payload)
+    assert response.status_code == 422
+
+
+def test_score_ontology_curie_filter(monkeypatch, canned_tidy, braf_payload):
+    make_client(monkeypatch, canned_tidy)
+    braf_payload["ontology_curies"] = ["UBERON:0009999"]
+    try:
+        response = TestClient(app).post("/score", json=braf_payload)
+    finally:
+        app.dependency_overrides.clear()
+    assert response.status_code == 200
+    # Only the tissue-agnostic SPLICE_SITES row survives a non-matching curie.
+    assert {row["output_type"] for row in response.json()["scores"]} == {"SPLICE_SITES"}
+
+
+def test_score_ontology_curie_filter_keeps_matching_tissue(
+    monkeypatch, canned_tidy, braf_payload
+):
+    make_client(monkeypatch, canned_tidy)
+    braf_payload["ontology_curies"] = ["UBERON:0001264"]
+    try:
+        response = TestClient(app).post("/score", json=braf_payload)
+    finally:
+        app.dependency_overrides.clear()
+    assert response.status_code == 200
+    assert {row["output_type"] for row in response.json()["scores"]} == {
+        "RNA_SEQ",
+        "SPLICE_SITES",
+        "SPLICE_SITE_USAGE",
+        "SPLICE_JUNCTIONS",
+    }
+
+
+def test_score_custom_scorers(monkeypatch, canned_tidy, braf_payload):
+    fake = make_client(monkeypatch, canned_tidy)
+    braf_payload["scorers"] = ["RNA_SEQ"]
+    try:
+        response = TestClient(app).post("/score", json=braf_payload)
+    finally:
+        app.dependency_overrides.clear()
+    assert response.status_code == 200
+    _, _, scorers = fake.calls[0]
+    assert len(scorers) == 1
+
+
+def test_score_rejects_unknown_scorer(braf_payload):
+    braf_payload["scorers"] = ["NOT_A_SCORER"]
+    response = TestClient(app).post("/score", json=braf_payload)
+    assert response.status_code == 422
