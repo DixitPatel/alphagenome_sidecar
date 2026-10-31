@@ -1,3 +1,6 @@
+import asyncio
+from functools import lru_cache
+
 from fastapi import Depends, FastAPI, HTTPException
 
 from app import scoring
@@ -16,18 +19,19 @@ def health() -> dict[str, str]:
     return {"status": "ok", "service": "alphagenome-sidecar"}
 
 
+@lru_cache(maxsize=1)
 def get_client() -> scoring.dna_client.DnaClient:
     return scoring.create_client()
 
 
 @app.post("/score")
-def score_variant(
+async def score_variant(
     request: ScoreRequest,
     client: scoring.dna_client.DnaClient = Depends(get_client),
 ) -> dict:
     log_debug("PHASE 4: SIDECAR REQUEST RECEIVED", f"Incoming POST /score: {request.dict()}")
     try:
-        response = scoring.score_with_client(request, client)
+        response = await asyncio.to_thread(scoring.score_with_client, request, client)
         log_debug(
             "PHASE 4: SIDECAR RESPONSE RETURNED",
             f"Returning score response for variant '{request.variant}': "
