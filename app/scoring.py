@@ -5,7 +5,7 @@ with the four recommended scorers, runs ``tidy_scores`` locally, filters rows
 to the canonical gene, and assembles the ``alpha_genome`` payload from
 ``workstreams/contracts/alpha_genome_schema.json``.
 
-No literature handling lives here: the response carries no ``literature`` key.
+No literature handling lives here: the response carries no ``literature`` key
 """
 
 import math
@@ -33,11 +33,11 @@ MERGED_SPLICING_SCORERS = (SPLICE_SITES, SPLICE_SITE_USAGE, SPLICE_JUNCTIONS)
 
 
 class UpstreamUnavailableError(RuntimeError):
-    """AlphaGenome API is unreachable, unconfigured, or returned an error."""
+    """AlphaGenome API is unreachable, unconfigured, or returned an error"""
 
 
 class RateLimitedError(RuntimeError):
-    """AlphaGenome API rate limit exceeded."""
+    """AlphaGenome API rate limit exceeded"""
 
 
 def build_variant(request: ScoreRequest) -> genome.Variant:
@@ -57,7 +57,7 @@ def build_interval(variant: genome.Variant, sequence_length: int = SEQUENCE_LENG
     here: a telomeric variant with a wide window would otherwise send a
     negative start to the API. Future iteration: replace the manual shift
     with a chromosome-bounds-aware clamp once contig lengths are available
-    in the sidecar.
+    in the sidecar
     """
     interval = variant.reference_interval.resize(sequence_length)
     if interval.start < 0:
@@ -102,7 +102,7 @@ def create_client(api_key: str | None = None) -> dna_client.DnaClient:
 def score_with_client(
     request: ScoreRequest, client: dna_client.DnaClient
 ) -> dict:
-    """Run the full pipeline with an injected client (no env access)."""
+    """Run the full pipeline with an injected client (no env access)"""
     variant = build_variant(request)
     interval = build_interval(variant, request.sequence_length)
     log_debug(
@@ -201,7 +201,7 @@ def _filter_to_canonical_gene(
 
 
 def _merged_splicing_score(filtered: pd.DataFrame) -> float | None:
-    """max(SPLICE_SITES) + max(SPLICE_SITE_USAGE) + max(SPLICE_JUNCTIONS) / 5."""
+    """max(SPLICE_SITES) + max(SPLICE_SITE_USAGE) + max(SPLICE_JUNCTIONS) / 5"""
     if filtered.empty or "output_type" not in filtered.columns:
         return None
     maxima = (

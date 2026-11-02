@@ -1,9 +1,4 @@
-"""Request/response shapes for POST /score.
-
-Mirrors workstreams/contracts/sidecar_openapi.yaml. There is no literature
-surface: no ``include_literature`` request field and no ``literature`` response
-key. Unknown extra fields are ignored so older payloads still validate.
-"""
+"""Request and response models for the variant scoring API"""
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -12,13 +7,10 @@ from alphagenome.models.v1 import variant_scorers as variant_scorers_module
 CHROMOSOME_PATTERN = r"^chr([1-9]|1[0-9]|2[0-2]|X|Y)$"
 ALLELE_PATTERN = r"^[ACGT]+$"
 
-# Sidecar-side allowlist (no SDK constant exists in 0.10.0; valid lengths
-# are enforced server-side, so anything outside this list is rejected here).
+# Reject unsupported sequence lengths
 ALLOWED_SEQUENCE_LENGTHS = (16384, 131072, 524288, 1048576)
 DEFAULT_SEQUENCE_LENGTH = 1048576
-# Addressable scorers: keys of RECOMMENDED_VARIANT_SCORERS (superset that
-# includes the 4 scoring defaults). Genuinely custom scorers cannot be built
-# from a string and are out of scope.
+# List of recommended scorers currently implemented
 SUPPORTED_SCORER_NAMES = frozenset(variant_scorers_module.RECOMMENDED_VARIANT_SCORERS.keys())
 
 
