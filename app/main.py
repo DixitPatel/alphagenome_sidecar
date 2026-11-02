@@ -2,8 +2,10 @@ import asyncio
 from functools import lru_cache
 
 from fastapi import Depends, FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 
 from app import scoring
+from app.copilot_router import router as copilot_router
 from app.logger import log_debug
 from app.schemas import ScoreRequest
 
@@ -12,6 +14,14 @@ app = FastAPI(
     description="Scores GRCh38 variants via AlphaGenome and returns gene-filtered summaries for Genome Nexus.",
     version="0.1.0",
 )
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["https://localhost:3000", "http://localhost:3000", "*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+app.include_router(copilot_router, prefix="/copilot")
 
 
 @app.get("/health")
