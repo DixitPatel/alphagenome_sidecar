@@ -4,8 +4,6 @@ Wraps ``dna_client.score_variant`` over a parameterized window (default 1 Mb)
 with the four recommended scorers, runs ``tidy_scores`` locally, filters rows
 to the canonical gene, and assembles the ``alpha_genome`` payload from
 ``workstreams/contracts/alpha_genome_schema.json``.
-
-No literature handling lives here: the response carries no ``literature`` key
 """
 
 import math

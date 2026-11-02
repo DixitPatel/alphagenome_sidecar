@@ -128,7 +128,6 @@ def test_score_filters_to_canonical_gene(monkeypatch, canned_tidy, braf_payload)
     assert body["model_version"] == "alphagenome-v1"
     assert body["canonical_gene_id"] == "ENSG00000157764"
     assert body["canonical_gene"] == "BRAF"
-    assert "literature" not in body
     gene_names = {row["gene_name"] for row in body["scores"]}
     assert gene_names == {"BRAF"}
     by_type = {row["output_type"]: row for row in body["scores"]}
