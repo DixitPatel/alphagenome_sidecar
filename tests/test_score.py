@@ -324,3 +324,102 @@ def test_score_rejects_unknown_scorer(braf_payload):
     braf_payload["scorers"] = ["NOT_A_SCORER"]
     response = TestClient(app).post("/score", json=braf_payload)
     assert response.status_code == 422
+
+
+def test_score_sorts_rows_most_to_least_impacted_and_computes_score_level(
+    monkeypatch, braf_payload
+):
+    tidy = pd.DataFrame(
+        [
+            {
+                "gene_id": "ENSG00000157764",
+                "gene_name": "BRAF",
+                "output_type": "RNA_SEQ",
+                "variant_scorer": "GeneMaskLFCScorer",
+                "track_name": "low_track",
+                "ontology_curie": "UBERON:0000955",
+                "biosample_name": "brain",
+                "raw_score": 0.04,
+                "quantile_score": 0.4,
+            },
+            {
+                "gene_id": "ENSG00000157764",
+                "gene_name": "BRAF",
+                "output_type": "RNA_SEQ",
+                "variant_scorer": "GeneMaskLFCScorer",
+                "track_name": "strong_neg_track",
+                "ontology_curie": "UBERON:0001264",
+                "biosample_name": "pancreas",
+                "raw_score": -0.75,
+                "quantile_score": -0.996,
+            },
+            {
+                "gene_id": "ENSG00000157764",
+                "gene_name": "BRAF",
+                "output_type": "SPLICE_SITE_USAGE",
+                "variant_scorer": "GeneMaskSplicingScorer",
+                "track_name": "moderate_splice_track",
+                "ontology_curie": "UBERON:0002048",
+                "biosample_name": "lung",
+                "raw_score": 0.30,
+                "quantile_score": 0.995,
+            },
+        ]
+    )
+    make_client(monkeypatch, tidy)
+    try:
+        response = TestClient(app).post("/score", json=braf_payload)
+    finally:
+        app.dependency_overrides.clear()
+    assert response.status_code == 200
+    body = response.json()
+    assert body["score_level"] == "strong"
+    assert [row["track_name"] for row in body["scores"]] == [
+        "strong_neg_track",
+        "moderate_splice_track",
+        "low_track",
+    ]
+    assert "score_level" not in body["scores"][0]
+
+
+def test_score_level_moderate_and_none(monkeypatch, braf_payload):
+    moderate_tidy = pd.DataFrame(
+        [
+            {
+                "gene_id": "ENSG00000157764",
+                "gene_name": "BRAF",
+                "output_type": "SPLICE_SITES",
+                "variant_scorer": "GeneMaskSplicingScorer",
+                "track_name": "donor",
+                "raw_score": 0.25,
+                "quantile_score": 0.992,
+            }
+        ]
+    )
+    make_client(monkeypatch, moderate_tidy)
+    try:
+        mod_resp = TestClient(app).post("/score", json=braf_payload)
+    finally:
+        app.dependency_overrides.clear()
+    assert mod_resp.json()["score_level"] == "moderate"
+
+    below_gate_tidy = pd.DataFrame(
+        [
+            {
+                "gene_id": "ENSG00000157764",
+                "gene_name": "BRAF",
+                "output_type": "RNA_SEQ",
+                "variant_scorer": "GeneMaskLFCScorer",
+                "track_name": "pancreas",
+                "raw_score": 0.8,
+                "quantile_score": 0.95,
+            }
+        ]
+    )
+    make_client(monkeypatch, below_gate_tidy)
+    try:
+        none_resp = TestClient(app).post("/score", json=braf_payload)
+    finally:
+        app.dependency_overrides.clear()
+    assert none_resp.json()["score_level"] is None
+

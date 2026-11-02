@@ -159,10 +159,12 @@ def score_with_client(
     )
 
     rows = [_row_to_dict(row) for _, row in filtered.iterrows()]
+    rows.sort(key=_row_sort_key, reverse=True)
+    score_level = _overall_score_level(rows)
     merged_splicing = _merged_splicing_score(filtered)
     log_debug(
         "PHASE 4: SIDECAR EXECUTION",
-        f"Computed merged splicing score: {merged_splicing}",
+        f"Computed merged splicing score: {merged_splicing}, score_level: {score_level}",
     )
 
     return {
@@ -174,6 +176,7 @@ def score_with_client(
         "canonical_gene_id": request.canonical_gene_id,
         "canonical_gene": request.canonical_gene,
         "merged_splicing_score": merged_splicing,
+        "score_level": score_level,
         "scores": rows,
     }
 
@@ -214,6 +217,56 @@ def _merged_splicing_score(filtered: pd.DataFrame) -> float | None:
         + maxima.get(SPLICE_SITE_USAGE, 0.0)
         + maxima.get(SPLICE_JUNCTIONS, 0.0) / 5.0
     )
+
+
+def _row_sort_key(row: dict) -> tuple[float, float]:
+    """Order rows from most impacted to least impacted by |raw_score|"""
+    raw = row.get("raw_score")
+    quantile = row.get("quantile_score")
+    return (
+        abs(raw) if raw is not None else -1.0,
+        abs(quantile) if quantile is not None else -1.0,
+    )
+
+
+def _row_score_level(
+    output_type: str | None,
+    raw_score: float | None,
+    quantile_score: float | None,
+) -> str | None:
+    """Dual-gate evaluation: |quantile| >= 0.99 plus output-specific raw threshold"""
+    if raw_score is None or quantile_score is None:
+        return None
+    if abs(quantile_score) < 0.99:
+        return None
+    if output_type == RNA_SEQ:
+        if abs(raw_score) >= 0.5:
+            return "strong"
+        if abs(raw_score) >= 0.1:
+            return "moderate"
+        return None
+    if raw_score >= 0.5:
+        return "strong"
+    if raw_score >= 0.2:
+        return "moderate"
+    return None
+
+
+def _overall_score_level(rows: list[dict]) -> str | None:
+    """Highest dual-gate badge level ('strong' > 'moderate' > None) across rows"""
+    best: str | None = None
+    for row in rows:
+        level = _row_score_level(
+            row.get("output_type"),
+            row.get("raw_score"),
+            row.get("quantile_score"),
+        )
+        if level == "strong":
+            return "strong"
+        if level == "moderate":
+            best = "moderate"
+    return best
+
 
 
 def _row_to_dict(row: pd.Series) -> dict:
