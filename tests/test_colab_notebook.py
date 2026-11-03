@@ -54,7 +54,7 @@ def test_notebook_matches_builder():
 
 
 def test_code_cells_parse(code_cells):
-    assert len(code_cells) == 6
+    assert len(code_cells) == 7
     for number, source in enumerate(code_cells, start=1):
         python = "\n".join(
             line for line in source.splitlines() if not line.lstrip().startswith("!")
@@ -67,7 +67,7 @@ def test_code_cells_parse(code_cells):
 
 def test_pip_pin_matches_sidecar_env(code_cells):
     installed = importlib.metadata.version("alphagenome")
-    assert f"pip install alphagenome=={installed}" in code_cells[0]
+    assert re.search(rf"pip install .*alphagenome=={re.escape(installed)}\b", code_cells[0])
 
 
 def test_cell_2_has_api_key_field(code_cells):
@@ -76,10 +76,10 @@ def test_cell_2_has_api_key_field(code_cells):
     assert "colab_utils.get_api_key()" in cell_2
 
 
-def test_cell_3_has_form_fields(code_cells):
-    cell_3 = code_cells[2]
+def test_cell_4_has_form_fields(code_cells):
+    cell_4 = code_cells[3]
     for name in FORM_FIELDS:
-        assert re.search(rf"^{name} = .*# @param", cell_3, re.MULTILINE), name
+        assert re.search(rf"^{name} = .*# @param", cell_4, re.MULTILINE), name
 
 
 def test_notebook_has_no_outputs(code_cells, notebook):
