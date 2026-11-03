@@ -25,28 +25,20 @@ COLAB_BADGE_URL = (
     f"/blob/{NOTEBOOK_REF}/colabs/cancer_variant_cookbook.ipynb"
 )
 
-INTRO = f"""# AlphaGenome variant viewer for cBioPortal
+INTRO = f"""# AlphaGenome Cancer Variant Inspector & Visualization Cookbook
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)]({COLAB_BADGE_URL})
 
-This notebook plots AlphaGenome predictions for one somatic variant from the
-cBioPortal patient view. It uses the same model version, output types, tissue
-and strand rule as the cBioPortal AlphaGenome sidecar.
+> **Meta Global AI Developer Hackathon 2026** — *Build for Your World*
+> Companion cookbook for **cBioPortal & Genome Nexus AlphaGenome Integration**
 
-**Steps**
+This interactive notebook allows cancer researchers to inspect **1 Mb base-pair resolution predictions** from Google DeepMind’s AlphaGenome model for somatic variants identified in cBioPortal.
 
-1. Add your AlphaGenome API key as the Colab secret `ALPHA_GENOME_API_KEY`
-   (key icon in the left panel). Get a key at https://alphagenome.google/api.
-2. Run cells 1 and 2.
-3. In cBioPortal, open **Ask Muse > Colab Cookbook**, pick a variant and click
-   **Copy cell 3**. Here, select all text in cell 3 and paste.
-4. Run cells 3 to 6.
-
-The default values in cell 3 are KRAS G12D (GRCh38 chr12:25245350 C>T) in
-pancreas (UBERON:0001264).
-
-Model predictions for research use only. Not for clinical decisions. Use of the
-AlphaGenome API is subject to https://alphagenome.google/terms.
+### What this Cookbook Does:
+1. **Centers a 1 Mb sequence window** around any cancer variant (SNV or indel).
+2. **Extracts strand-specific RNA-seq coverage** for the patient’s matched cancer tissue (e.g. Pancreas ).
+3. **Dynamically detects gene strand** ( vs ) to prevent false-negative flatlines.
+4. **Plots Overlaid REF vs. ALT tracks** to visualize transcriptional repression, promoter shifts, and splicing disruption.
 """
 
 CELL_1 = f"""# @title 1. Install AlphaGenome (same version as the cBioPortal sidecar)
