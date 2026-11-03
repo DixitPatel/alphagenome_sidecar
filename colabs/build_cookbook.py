@@ -48,6 +48,9 @@ clear_output()
 """
 
 CELL_2 = r"""# @title 2. Imports, model and gene annotation
+# @markdown Enter your non-commercial AlphaGenome API key from [alphagenome.google/api](https://alphagenome.google/api).
+API_KEY = ""  # @param {type:"string"}
+
 import json
 
 import pandas as pd
@@ -57,8 +60,11 @@ from alphagenome.data import gene_annotation, genome, transcript
 from alphagenome.models.v1 import dna_client
 from alphagenome.visualization import plot_components
 
-# Reads the Colab secret ALPHA_GENOME_API_KEY.
-dna_model = dna_client.create(colab_utils.get_api_key())
+if not API_KEY.strip():
+  # Fallback to the Colab secret ALPHA_GENOME_API_KEY if left blank
+  API_KEY = colab_utils.get_api_key()
+
+dna_model = dna_client.create(API_KEY.strip())
 
 HG38_GTF_FEATHER = (
     'https://storage.googleapis.com/alphagenome/reference/gencode/'

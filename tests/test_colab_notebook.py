@@ -70,6 +70,12 @@ def test_pip_pin_matches_sidecar_env(code_cells):
     assert f"pip install alphagenome=={installed}" in code_cells[0]
 
 
+def test_cell_2_has_api_key_field(code_cells):
+    cell_2 = code_cells[1]
+    assert re.search(r'^API_KEY = "".*# @param', cell_2, re.MULTILINE)
+    assert "colab_utils.get_api_key()" in cell_2
+
+
 def test_cell_3_has_form_fields(code_cells):
     cell_3 = code_cells[2]
     for name in FORM_FIELDS:
