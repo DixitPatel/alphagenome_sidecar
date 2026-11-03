@@ -347,6 +347,169 @@ def test_inspect_batch_failures_no_false_positive_on_null_error_or_before_liftov
     assert failures == []
 
 
+def _force_pubmed_offline(monkeypatch):
+    """Force deterministic PubMed fallback (no network in tests)."""
+    import httpx
+
+    from app import copilot_router
+
+    monkeypatch.setattr(copilot_router, "_esearch_pubmed", lambda *a, **k: None)
+    monkeypatch.setattr(copilot_router, "_esummary_pubmed", lambda *a, **k: None)
+
+    class _DeadClient:
+        def __init__(self, *a, **k):
+            raise ConnectionError("offline")
+
+    monkeypatch.setattr(httpx, "Client", _DeadClient)
+
+
+def test_stage1_query_pubmed_fallback(isolated_kb, monkeypatch):
+    from app import copilot_router
+
+    assert "query_pubmed" in copilot_router.ACTION_TYPES
+    assert "[mh]" not in copilot_router._build_pubmed_query(["KRAS"], "PAAD").lower().replace("[tiab]", "")
+    monkeypatch.delenv("META_API_KEY", raising=False)
+    monkeypatch.delenv("MUSE_WONDER_API_URL", raising=False)
+    _force_pubmed_offline(monkeypatch)
+    response = client.post(
+        "/copilot/chat",
+        json={"message": "search", "action_type": "query_pubmed", "study_id": "s",
+              "cancer_type": "PAAD", "case_id": "c", "variants": SAMPLE_VARIANTS,
+              "history": []},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source"] == "fallback"
+    assert "KRAS[tiab]" in body["query"]
+    assert "[mh]" not in body["query"]
+    assert body["query"].count("AND") >= 2  # 3-part Boolean
+    assert body["pubmed_url"].startswith("https://pubmed.ncbi.nlm.nih.gov/")
+    pmids = [p["pmid"] for p in body["papers"]]
+    assert "41986348" in pmids and "38291024" in pmids
+    for paper in body["papers"]:
+        assert set(("pmid", "title", "source", "pubdate", "url")) <= set(paper)
+
+
+def test_stage1_free_text_literature(isolated_kb, monkeypatch):
+    monkeypatch.delenv("META_API_KEY", raising=False)
+    monkeypatch.delenv("MUSE_WONDER_API_URL", raising=False)
+    _force_pubmed_offline(monkeypatch)
+    response = client.post(
+        "/copilot/chat",
+        json={"message": "find literature on KRAS for this case", "study_id": "s",
+              "cancer_type": "PAAD", "case_id": "c", "variants": SAMPLE_VARIANTS,
+              "history": []},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source"] == "fallback"
+    assert "query" in body and "papers" in body and "pubmed_url" in body
+    assert any(p["pmid"] == "41986348" for p in body["papers"])
+
+
+def test_stage2_synthesize_pmids_cached_fallback(isolated_kb, monkeypatch):
+    monkeypatch.delenv("META_API_KEY", raising=False)
+    monkeypatch.delenv("MUSE_WONDER_API_URL", raising=False)
+    _force_pubmed_offline(monkeypatch)
+    response = client.post(
+        "/copilot/synthesize-pmids",
+        json={"pmids": ["41986348", "38291024", "15014009", "11553622", "37874914"],
+              "question": "How do KRAS and TP53 cooperate?",
+              "study_id": "s", "case_id": "c", "cancer_type": "PAAD",
+              "variants": SAMPLE_VARIANTS},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source"] == "fallback"
+    assert body["synthesized_pmids"] == ["41986348", "38291024", "15014009", "11553622", "37874914"]
+    assert len(body["ingested_papers"]) == 5
+    assert all(p["abstract"] for p in body["ingested_papers"])
+    assert "41986348" in body["reply"] and "38291024" in body["reply"]
+
+
+def test_stage3_grounded_followup(isolated_kb, monkeypatch):
+    monkeypatch.delenv("META_API_KEY", raising=False)
+    monkeypatch.delenv("MUSE_WONDER_API_URL", raising=False)
+    _force_pubmed_offline(monkeypatch)
+    client.post(
+        "/copilot/synthesize-pmids",
+        json={"pmids": ["41986348"], "question": "q", "study_id": "s",
+              "case_id": "c", "cancer_type": "PAAD", "variants": SAMPLE_VARIANTS},
+    )
+    response = client.post(
+        "/copilot/chat",
+        json={"message": "summarize the ingested evidence", "study_id": "s",
+              "cancer_type": "PAAD", "case_id": "c", "variants": SAMPLE_VARIANTS,
+              "history": [], "ingested_pmids": ["41986348"],
+              "active_tab": "literature", "chart_context": {"chart": "tmb"}},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source"] == "fallback"
+    assert body["grounded_pmids"] == ["41986348"]
+    assert "PMID 41986348" in body["reply"]
+
+
+def test_colab_recipe(isolated_kb, monkeypatch):
+    monkeypatch.delenv("META_API_KEY", raising=False)
+    monkeypatch.delenv("MUSE_WONDER_API_URL", raising=False)
+    response = client.post(
+        "/copilot/chat",
+        json={"message": "recipe", "action_type": "colab_recipe", "study_id": "s",
+              "cancer_type": "PAAD", "case_id": "c", "variants": SAMPLE_VARIANTS,
+              "history": []},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source"] == "fallback"
+    assert "Clinical Recipe Card" in body["reply"]
+    assert body["colab_url"] == (
+        "https://colab.research.google.com/github/DixitPatel/alphagenome_sidecar"
+        "/blob/main/colabs/cancer_variant_cookbook.ipynb"
+    )
+    assert body["colab_url"] in body["reply"]
+
+
+CONTEXTUAL_ACTIONS = ["fail_kinetics", "cdkn2a_tp53_axis", "ras_cellcycle_cooperation",
+                      "survival_gap", "tmb_grade_paradox",
+                      "pathology_r1_reconciliation", "angioinvasion_failure"]
+
+
+@pytest.mark.parametrize("action", CONTEXTUAL_ACTIONS)
+def test_contextual_actions_offline(isolated_kb, action, monkeypatch):
+    from app import copilot_router
+
+    assert action in copilot_router.ACTION_TYPES
+    monkeypatch.delenv("META_API_KEY", raising=False)
+    monkeypatch.delenv("MUSE_WONDER_API_URL", raising=False)
+    response = client.post(
+        "/copilot/chat",
+        json={"message": "context", "action_type": action, "study_id": "s",
+              "cancer_type": "PAAD", "case_id": "c", "variants": SAMPLE_VARIANTS,
+              "history": []},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source"] == "fallback"
+    assert body["action_type"] == action
+    assert len(body["reply"]) > 50
+
+
+def test_contextual_chart_query(isolated_kb):
+    response = client.post(
+        "/copilot/contextual-chart-query",
+        json={"question": "why does this bar spike?", "study_id": "s",
+              "cancer_type": "PAAD", "case_id": "c", "variants": SAMPLE_VARIANTS,
+              "active_tab": "tmb", "chart_context": {"chart": "tmb", "peak": 42}},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source"] == "fallback"
+    assert body["active_tab"] == "tmb"
+    assert body["chart_context"] == {"chart": "tmb", "peak": 42}
+    assert "spike" in body["reply"]
+
+
 def test_inspect_batch_failures_detects_real_liftover_and_ref_check_failures(tmp_path, monkeypatch):
     log = tmp_path / "debug.log"
     v_lift = "1:g.100A>T"
