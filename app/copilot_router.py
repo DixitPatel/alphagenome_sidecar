@@ -7,6 +7,7 @@ Never logs the API key and never imports LiteLLM.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -14,6 +15,7 @@ from pathlib import Path
 
 import httpx
 from fastapi import APIRouter
+from fastapi.responses import StreamingResponse
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 from app import sample_trainer
@@ -921,6 +923,65 @@ async def copilot_chat(request: ChatRequest) -> dict:
     if live is not None:
         return live
     return _fallback_reply(request)
+
+
+@router.post("/chat/stream")
+async def copilot_chat_stream(request: ChatRequest):
+    """Server-Sent Events (SSE) streaming endpoint for Co-Pilot interactions.
+    
+    Streams deltas in real-time as `data: {"delta": str, "done": bool}\n\n`
+    and concludes with a terminal frame containing full metadata.
+    """
+    if request.action_type and request.action_type not in ACTION_TYPES:
+        async def invalid_generator():
+            payload = {
+                "delta": "",
+                "done": True,
+                "reply": f"Unknown action_type '{request.action_type}'. Supported: {', '.join(ACTION_TYPES)}.",
+                "action_type": request.action_type,
+                "source": "fallback",
+            }
+            yield f"data: {json.dumps(payload)}\n\n"
+
+        return StreamingResponse(
+            invalid_generator(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+        )
+
+    async def event_generator():
+        live = await _wonder_reply(request)
+        final_payload = live if live is not None else _fallback_reply(request)
+        reply_text = str(final_payload.get("reply") or "")
+
+        # Stream words/tokens for smooth visual typing in client
+        words = reply_text.split(" ")
+        chunk_size = 3
+        for i in range(0, len(words), chunk_size):
+            chunk = " ".join(words[i : i + chunk_size])
+            if i + chunk_size < len(words):
+                chunk += " "
+            event_data = json.dumps({"delta": chunk, "done": False})
+            yield f"data: {event_data}\n\n"
+            await asyncio.sleep(0.015)
+
+        # Terminal frame with done=True and complete payload
+        terminal_data = {
+            "delta": "",
+            "done": True,
+            **final_payload,
+        }
+        yield f"data: {json.dumps(terminal_data)}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 def _deterministic_synthesis(papers: list[dict], question: str) -> str:

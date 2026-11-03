@@ -530,3 +530,28 @@ def test_inspect_batch_failures_detects_real_liftover_and_ref_check_failures(tmp
     assert by_id[v_ref]["cause"] == "ref_check_mismatch"
     assert by_id[v_pre]["cause"] == "unsupported_variant"
     assert by_id[v_side]["cause"] == "sidecar_error"
+
+
+def test_copilot_chat_stream_sse(isolated_kb):
+    response = client.post(
+        "/copilot/chat/stream",
+        json={
+            "message": "tell me about KRAS",
+            "study_id": "paad_tcga_pan_can_atlas_2018",
+            "cancer_type": "PAAD",
+            "variants": SAMPLE_VARIANTS,
+        },
+    )
+    assert response.status_code == 200
+    assert "text/event-stream" in response.headers["content-type"]
+    lines = [line.strip() for line in response.text.split("\n") if line.startswith("data: ")]
+    assert len(lines) >= 2
+    events = [json.loads(line[len("data: ") :]) for line in lines]
+    # First events have done=False and non-empty delta
+    assert events[0]["done"] is False
+    assert len(events[0]["delta"]) > 0
+    # Final event has done=True
+    terminal = events[-1]
+    assert terminal["done"] is True
+    assert "reply" in terminal
+    assert terminal["source"] == "fallback"
