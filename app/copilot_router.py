@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import re
 from pathlib import Path
@@ -53,6 +54,41 @@ _load_central_env()
 router = APIRouter()
 
 WONDER_MODEL = "muse-wonder-1.0"
+_WONDER_TIMEOUT_S = 35.0
+
+logger = logging.getLogger(__name__)
+
+# System rules for Hosted Muse Wonder chat-completions calls: act as a
+# Precision Oncology Molecular Tumor Board Bioinformatician, integrate the
+# provided KB/abstract context concretely, cite PMIDs inline, and close with
+# the non-therapeutic disclaimer. Never echoed back to the client verbatim.
+_WONDER_RULES = (
+    "You are a Precision Oncology Molecular Tumor Board Bioinformatician. "
+    "Answer strictly from the supplied knowledge-base context, ingested paper "
+    "abstracts, and patient variant data; cite papers inline as [PMID xxxxxxxx]. "
+    "Concretely integrate timeline intervals, pathway states, AlphaGenome scores, "
+    "and pathology findings instead of summarizing the page. "
+    "Close with: 'Model reasoning based on cBioPortal clinical and pathway data; "
+    "not for direct therapeutic prescription.'"
+)
+
+_VALID_HISTORY_ROLES = {"developer", "system", "user", "assistant"}
+
+
+def _history_messages(history: list) -> list[dict]:
+    """Normalize stored chat history turns to chat-completions messages."""
+    messages: list[dict] = []
+    for turn in history or []:
+        if not isinstance(turn, dict):
+            continue
+        role = str(turn.get("role") or "user")
+        content = str(turn.get("content") or "")
+        if not content:
+            continue
+        messages.append(
+            {"role": role if role in _VALID_HISTORY_ROLES else "user", "content": content}
+        )
+    return messages
 ACTION_TYPES = (
     "map_oncotree",
     "cross_reference_genes",
@@ -244,7 +280,13 @@ def _build_pubmed_query(
     message: str = "",
 ) -> str:
     """Warning-free 3-part Boolean query: GENE[tiab] AND cancer AND modality."""
-    gene_part = _gene_clause(genes)
+    target_genes = genes
+    if message:
+        tokens = {t.upper() for t in re.findall(r"\b[A-Za-z0-9_-]{2,12}\b", message)}
+        mentioned = [g for g in genes if g.upper() in tokens]
+        if mentioned:
+            target_genes = mentioned
+    gene_part = _gene_clause(target_genes)
     cancer_bits = [f"{t}[tiab]" for t in _CANCER_TERMS]
     if cancer_type and cancer_type.strip():
         cancer_bits.insert(0, f"{cancer_type.strip()}[tiab]")
@@ -853,30 +895,44 @@ async def _wonder_reply(request: ChatRequest) -> dict | None:
         "oncotree_entry": entry,
         "gene_summary": _rich_gene_bullets(genes) if genes else "",
     }
+    if request.ingested_pmids:
+        kb_context["ingested_pmids"] = request.ingested_pmids
+        kb_context["ingested_papers"] = [
+            {
+                "pmid": p,
+                "title": (_INGESTED_ABSTRACTS.get(p) or _PMID_ABSTRACT_CACHE.get(p, {})).get("title", ""),
+                "abstract": (_INGESTED_ABSTRACTS.get(p) or _PMID_ABSTRACT_CACHE.get(p, {})).get("abstract", ""),
+            }
+            for p in request.ingested_pmids
+            if _INGESTED_ABSTRACTS.get(p) or _PMID_ABSTRACT_CACHE.get(p)
+        ]
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=_WONDER_TIMEOUT_S) as client:
             response = await client.post(
-                base_url.rstrip("/") + "/chat",
+                base_url.rstrip("/") + "/chat/completions",
                 headers={"Authorization": f"Bearer {api_key}"},
                 json={
                     "model": WONDER_MODEL,
-                    "message": request.message,
-                    "action_type": request.action_type,
-                    "study_id": request.study_id,
-                    "cancer_type": request.cancer_type,
-                    "case_id": request.case_id,
-                    "variants": [v.model_dump() for v in request.variants],
-                    "history": request.history,
-                    "kb_context": kb_context,
+                    "reasoning_effort": "low",
+                    "messages": [
+                        {"role": "developer", "content": _WONDER_RULES},
+                        {"role": "developer", "content": json.dumps(kb_context)},
+                        *_history_messages(request.history),
+                        {"role": "user", "content": request.message},
+                    ],
                 },
             )
             response.raise_for_status()
             data = response.json()
-        if isinstance(data, dict):
-            data.setdefault("source", "muse-wonder")
-            return data
-        return {"reply": str(data), "source": "muse-wonder"}
-    except Exception:
+        content = data["choices"][0]["message"]["content"]
+        return {
+            "reply": content,
+            "source": "muse-wonder",
+            "usage": data.get("usage"),
+        }
+    except Exception as exc:
+        status = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else "n/a"
+        logger.warning("muse-wonder /chat/completions failed (status=%s): %s", status, exc)
         return None
 
 
@@ -889,6 +945,21 @@ async def copilot_chat(request: ChatRequest) -> dict:
             "action_type": request.action_type,
             "source": "fallback",
         }
+    # Deterministic Stage 1 literature search & structured tool actions
+    # must return their structured payloads (e.g. papers, suggested_mapping).
+    if request.action_type in (
+        "query_pubmed",
+        "map_oncotree",
+        "show_batch_failures",
+        "cross_reference_genes",
+        "prep_literature_context",
+    ) or (
+        not request.action_type
+        and not request.ingested_pmids
+        and _looks_like_literature(request.message)
+    ):
+        return _fallback_reply(request)
+
     live = await _wonder_reply(request)
     if live is not None:
         return live
@@ -920,8 +991,21 @@ async def copilot_chat_stream(request: ChatRequest):
         )
 
     async def event_generator():
-        live = await _wonder_reply(request)
-        final_payload = live if live is not None else _fallback_reply(request)
+        if request.action_type in (
+            "query_pubmed",
+            "map_oncotree",
+            "show_batch_failures",
+            "cross_reference_genes",
+            "prep_literature_context",
+        ) or (
+            not request.action_type
+            and not request.ingested_pmids
+            and _looks_like_literature(request.message)
+        ):
+            final_payload = _fallback_reply(request)
+        else:
+            live = await _wonder_reply(request)
+            final_payload = live if live is not None else _fallback_reply(request)
         reply_text = str(final_payload.get("reply") or "")
 
         # Stream words/tokens for smooth visual typing in client
@@ -987,27 +1071,40 @@ def copilot_synthesize_pmids(request: SynthesizePmidsRequest) -> dict:
     base_url, api_key = _wonder_config()
     if base_url and api_key:
         try:
-            with httpx.Client(timeout=30.0) as client:
+            synthesis_query = (
+                f"Question: {request.question or 'Summarize these papers.'}\n"
+                f"Study: {request.study_id or 'n/a'} | Cancer: {request.cancer_type or 'n/a'} | "
+                f"Case: {request.case_id or 'n/a'} | "
+                f"Variants: {json.dumps([v.model_dump() for v in request.variants])}\n"
+                "Ingested papers:\n"
+                + "\n".join(
+                    f"- PMID {p['pmid']}: {p['title']} "
+                    f"({p.get('source', '')}, {p.get('pubdate', '')}). "
+                    f"Abstract: {p.get('abstract', '')}"
+                    for p in ingested
+                )
+            )
+            with httpx.Client(timeout=_WONDER_TIMEOUT_S) as client:
                 response = client.post(
-                    base_url.rstrip("/") + "/chat",
+                    base_url.rstrip("/") + "/chat/completions",
                     headers={"Authorization": f"Bearer {api_key}"},
                     json={
                         "model": WONDER_MODEL,
-                        "message": request.question,
-                        "action_type": "synthesize_pmids",
-                        "study_id": request.study_id,
-                        "cancer_type": request.cancer_type,
-                        "case_id": request.case_id,
-                        "variants": [v.model_dump() for v in request.variants],
-                        "history": [],
-                        "ingested_papers": ingested,
+                        "reasoning_effort": "low",
+                        "messages": [
+                            {"role": "developer", "content": _WONDER_RULES},
+                            {"role": "user", "content": synthesis_query},
+                        ],
                     },
                 )
                 response.raise_for_status()
                 data = response.json()
-            if isinstance(data, dict) and data.get("reply"):
-                reply = str(data["reply"])
-        except Exception:
+            content = data["choices"][0]["message"]["content"]
+            if content:
+                reply = str(content)
+        except Exception as exc:
+            status = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else "n/a"
+            logger.warning("muse-wonder synthesize-pmids failed (status=%s): %s", status, exc)
             reply = None
     if reply is None:
         reply = _deterministic_synthesis(ingested, request.question)

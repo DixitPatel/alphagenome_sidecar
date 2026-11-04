@@ -512,7 +512,11 @@ def test_inspect_batch_failures_detects_real_liftover_and_ref_check_failures(tmp
     assert by_id[v_side]["cause"] == "sidecar_error"
 
 
-def test_copilot_chat_stream_sse(isolated_kb):
+def test_copilot_chat_stream_sse(isolated_kb, monkeypatch):
+    # Hermetic SSE framing check: force the offline fallback path so the live
+    # Wonder call (when key + network are present) cannot change the source.
+    monkeypatch.delenv("META_API_KEY", raising=False)
+    monkeypatch.delenv("MUSE_WONDER_API_URL", raising=False)
     response = client.post(
         "/copilot/chat/stream",
         json={
