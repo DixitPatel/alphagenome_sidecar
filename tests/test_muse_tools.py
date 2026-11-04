@@ -125,3 +125,5 @@ def test_civic_and_cohort_live():
     row = cohort["results"][0]
     assert row["samples_in_study"] > 20000
     assert row["samples_with_protein_change"] >= 1
+    # Other variants are left out so Wonder cannot report them as this one.
+    assert "top_protein_changes" not in row

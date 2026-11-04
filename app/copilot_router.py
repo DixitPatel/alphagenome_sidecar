@@ -1147,6 +1147,8 @@ class ColabParamsRequest(BaseModel):
     # Sample-level OncoTree code (ONCOTREE_CODE); study types can be "mixed".
     oncotree_code: str | None = None
     cancer_type: str | None = None
+    # From the portal mutation (e.g. "X336_splice"); Mongo records do not store it.
+    protein_change: str | None = None
 
 
 @router.post("/colab-params")
@@ -1182,7 +1184,9 @@ def copilot_colab_params(request: ColabParamsRequest) -> dict:
         "hg38_variant": doc["hg38_variant"],
         "ontology_terms": ontology_terms,
         "tissue_label": entry.get("default_label", ""),
-        "param_cell": colab.render_param_cell(doc["hg38_variant"], gene, ontology_terms, scores),
+        "param_cell": colab.render_param_cell(
+            doc["hg38_variant"], gene, ontology_terms, scores, request.protein_change or ""
+        ),
         "colab_url": colab.colab_url(),
     }
 

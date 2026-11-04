@@ -179,7 +179,8 @@ def summarize_scores(doc: dict, ontology_terms: list[str]) -> dict:
 
 
 def render_param_cell(
-    hg38_variant: str, gene: str, ontology_terms: list[str], scores: dict
+    hg38_variant: str, gene: str, ontology_terms: list[str], scores: dict,
+    protein_change: str = "",
 ) -> str:
     chromosome, position, reference, alternate = parse_hg38(hg38_variant)
     scores_json = json.dumps(scores, separators=(",", ":"))
@@ -189,6 +190,7 @@ def render_param_cell(
         f"variant_reference_bases = {reference!r}  # @param {{type:\"string\"}}",
         f"variant_alternate_bases = {alternate!r}  # @param {{type:\"string\"}}",
         f"gene_symbol = {gene!r}  # @param {{type:\"string\"}}",
+        f"protein_change = {protein_change.removeprefix('p.')!r}  # @param {{type:\"string\"}}",
         f"ontology_terms = {list(ontology_terms)!r}  # @param",
         f"sidecar_scores = {scores_json!r}  # @param {{type:\"string\"}}",
     ]

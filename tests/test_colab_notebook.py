@@ -20,6 +20,7 @@ FORM_FIELDS = (
     "variant_reference_bases",
     "variant_alternate_bases",
     "gene_symbol",
+    "protein_change",
     "ontology_terms",
     "sidecar_scores",
 )

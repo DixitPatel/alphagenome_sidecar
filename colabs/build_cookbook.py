@@ -97,6 +97,7 @@ variant_position = 25245350  # @param {type:"integer"}
 variant_reference_bases = 'C'  # @param {type:"string"}
 variant_alternate_bases = 'T'  # @param {type:"string"}
 gene_symbol = 'KRAS'  # @param {type:"string"}
+protein_change = 'G12D'  # @param {type:"string"}
 ontology_terms = ['UBERON:0001264']  # @param
 sidecar_scores = ''  # @param {type:"string"}
 """
@@ -327,6 +328,7 @@ def build_facts():
   hw = summary_window_bp
   facts = {
       'variant': str(variant), 'gene': gene_symbol,
+      'protein_change': protein_change.strip().removeprefix('p.'),
       'gene_strand': gene_strand, 'ontology_terms': list(ontology_terms),
       'window_bp': f'+/-{hw} around the variant',
       'exon_context': exon_context(gtf, gene_symbol, c0),
@@ -373,7 +375,8 @@ TOOL_RULES = (
     'First use the tools: alphagenome_docs for what each score means; '
     'clinvar_lookup for this variant; gene_summary for the gene; search_pubmed '
     'then fetch_abstracts for literature on the gene and mechanism; '
-    'civic_lookup for cancer evidence; cohort_frequency when a study id is given. '
+    'civic_lookup with FACTS.protein_change as variant_name; cohort_frequency '
+    'with FACTS.protein_change when a study id is given. '
     'Then answer in three parts. '
     '1) "Mechanism": 2-3 plain sentences on what the variant most likely does '
     'to splicing and expression, step by step (for example: a splice site is '
@@ -384,7 +387,8 @@ TOOL_RULES = (
     '3) "Evidence": at most 5 bullets from tool results: the ClinVar '
     'classification of this exact allele with its review status, CIViC '
     'evidence, the gene role, literature and cohort frequency. Write "none '
-    'found" when a tool finds nothing. '
+    'found" when a tool finds nothing. Report cohort counts for this protein '
+    'change and this gene only; do not name other variants. '
     'Cite every claim in square brackets: [FACTS] for FACTS, or the id from a '
     'tool result, e.g. [PMID:123] or [ClinVar:VCV000001]. Cite only ids that a '
     'tool returned in this conversation. '

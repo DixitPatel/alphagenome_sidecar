@@ -270,14 +270,17 @@ def cohort_frequency(gene: str, study_id: str, protein_change: str = "") -> dict
         "gene": gene,
         "samples_in_study": total,
         "samples_with_gene_mutation": len(samples),
-        "top_protein_changes": [{"protein_change": k, "samples": len(v)} for k, v in top],
         "url": f"https://www.cbioportal.org/results/mutations?cancer_study_list="
                f"{study_id}&gene_list={gene}",
         "note": "Counts use all samples in the study as the denominator.",
     }
     if protein_change:
-        result["samples_with_protein_change"] = len(
-            by_change.get(protein_change.removeprefix("p."), set()))
+        change = protein_change.removeprefix("p.")
+        result["protein_change"] = change
+        result["samples_with_protein_change"] = len(by_change.get(change, set()))
+    else:
+        result["top_protein_changes"] = [
+            {"protein_change": k, "samples": len(v)} for k, v in top]
     return {"results": [result]}
 
 

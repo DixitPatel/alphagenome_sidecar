@@ -64,7 +64,9 @@ def test_summarize_scores_other_tissue_has_no_tissue_rows():
 
 def test_render_param_cell_parses_and_round_trips():
     summary = colab.summarize_scores(RECORD, COLON)
-    cell = colab.render_param_cell(RECORD["hg38_variant"], "CHEK2", COLON, summary)
+    cell = colab.render_param_cell(
+        RECORD["hg38_variant"], "CHEK2", COLON, summary, "p.X336_splice"
+    )
     assert cell.startswith("# @title 4. Cancer Variant & Target Tissue Parameters\n")
     values = _exec_cell(cell)
     chromosome, position, reference, alternate = colab.parse_hg38(RECORD["hg38_variant"])
@@ -73,6 +75,7 @@ def test_render_param_cell_parses_and_round_trips():
     assert values["variant_reference_bases"] == reference
     assert values["variant_alternate_bases"] == alternate
     assert values["gene_symbol"] == "CHEK2"
+    assert values["protein_change"] == "X336_splice"
     assert values["ontology_terms"] == COLON
     assert json.loads(values["sidecar_scores"]) == summary
 
