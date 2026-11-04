@@ -28,6 +28,10 @@ SPLICE_SITES = "SPLICE_SITES"
 SPLICE_SITE_USAGE = "SPLICE_SITE_USAGE"
 SPLICE_JUNCTIONS = "SPLICE_JUNCTIONS"
 MERGED_SPLICING_SCORERS = (SPLICE_SITES, SPLICE_SITE_USAGE, SPLICE_JUNCTIONS)
+# Off: sorting rows by |raw_score| made the first row (and the frontend's
+# default tissue) the top-scoring reference tissue, not the patient's tissue.
+# Rows keep tidy_scores order. score_level does not depend on row order.
+SORT_ROWS_BY_IMPACT = False
 
 
 class UpstreamUnavailableError(RuntimeError):
@@ -157,7 +161,8 @@ def score_with_client(
     )
 
     rows = [_row_to_dict(row) for _, row in filtered.iterrows()]
-    rows.sort(key=_row_sort_key, reverse=True)
+    if SORT_ROWS_BY_IMPACT:
+        rows.sort(key=_row_sort_key, reverse=True)
     score_level = _overall_score_level(rows)
     merged_splicing = _merged_splicing_score(filtered)
     log_debug(

@@ -325,9 +325,9 @@ def test_score_rejects_unknown_scorer(braf_payload):
     assert response.status_code == 422
 
 
-def test_score_sorts_rows_most_to_least_impacted_and_computes_score_level(
-    monkeypatch, braf_payload
-):
+@pytest.mark.parametrize("sort_enabled", [False, True])
+def test_score_row_order_and_score_level(monkeypatch, braf_payload, sort_enabled):
+    monkeypatch.setattr(scoring, "SORT_ROWS_BY_IMPACT", sort_enabled)
     tidy = pd.DataFrame(
         [
             {
@@ -373,11 +373,12 @@ def test_score_sorts_rows_most_to_least_impacted_and_computes_score_level(
     assert response.status_code == 200
     body = response.json()
     assert body["score_level"] == "strong"
-    assert [row["track_name"] for row in body["scores"]] == [
-        "strong_neg_track",
-        "moderate_splice_track",
-        "low_track",
-    ]
+    expected = (
+        ["strong_neg_track", "moderate_splice_track", "low_track"]
+        if sort_enabled
+        else ["low_track", "strong_neg_track", "moderate_splice_track"]
+    )
+    assert [row["track_name"] for row in body["scores"]] == expected
     assert "score_level" not in body["scores"][0]
 
 
