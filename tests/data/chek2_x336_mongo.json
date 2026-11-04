@@ -1,0 +1,205 @@
+{
+ "_id": "22:g.29095824A>G",
+ "hg38_variant": "chr22:28699836:A>G",
+ "canonical_gene": "CHEK2",
+ "score_level": "strong",
+ "merged_splicing_score": 2.3769287109375,
+ "scores": [
+  {
+   "output_type": "SPLICE_JUNCTIONS",
+   "ontology_curie": "UBERON:0001157",
+   "track_name": "junction_UBERON:0001157 gtex Colon_Transverse polyA plus RNA-seq",
+   "raw_score": 3.048828125,
+   "quantile_score": 0.9999775886535645
+  },
+  {
+   "output_type": "SPLICE_JUNCTIONS",
+   "ontology_curie": "UBERON:0001159",
+   "track_name": "junction_UBERON:0001159 gtex Colon_Sigmoid polyA plus RNA-seq",
+   "raw_score": 2.771484375,
+   "quantile_score": 0.9999752044677734
+  },
+  {
+   "output_type": "SPLICE_JUNCTIONS",
+   "ontology_curie": "UBERON:0001157",
+   "track_name": "junction_UBERON:0001157 total RNA-seq",
+   "raw_score": 2.455078125,
+   "quantile_score": 0.9999639987945557
+  },
+  {
+   "output_type": "SPLICE_JUNCTIONS",
+   "ontology_curie": "UBERON:0001159",
+   "track_name": "junction_UBERON:0001159 total RNA-seq",
+   "raw_score": 2.40625,
+   "quantile_score": 0.9999639987945557
+  },
+  {
+   "output_type": "SPLICE_JUNCTIONS",
+   "ontology_curie": "UBERON:0001159",
+   "track_name": "junction_UBERON:0001159 polyA plus RNA-seq",
+   "raw_score": 2.37109375,
+   "quantile_score": 0.9999760389328003
+  },
+  {
+   "output_type": "SPLICE_JUNCTIONS",
+   "ontology_curie": "UBERON:0001157",
+   "track_name": "junction_UBERON:0001157 total RNA-seq",
+   "raw_score": 2.005859375,
+   "quantile_score": 0.9999337792396545
+  },
+  {
+   "output_type": "SPLICE_JUNCTIONS",
+   "ontology_curie": "UBERON:0001159",
+   "track_name": "junction_UBERON:0001159 total RNA-seq",
+   "raw_score": 1.9423828125,
+   "quantile_score": 0.9999314546585083
+  },
+  {
+   "output_type": "SPLICE_JUNCTIONS",
+   "ontology_curie": "UBERON:0001157",
+   "track_name": "junction_UBERON:0001157 gtex Colon_Transverse polyA plus RNA-seq",
+   "raw_score": 1.904296875,
+   "quantile_score": 0.9999291300773621
+  },
+  {
+   "output_type": "SPLICE_JUNCTIONS",
+   "ontology_curie": "UBERON:0001157",
+   "track_name": "junction_UBERON:0001157 gtex Colon_Transverse polyA plus RNA-seq",
+   "raw_score": 1.8759765625,
+   "quantile_score": 0.9999266862869263
+  },
+  {
+   "output_type": "SPLICE_JUNCTIONS",
+   "ontology_curie": "UBERON:0001159",
+   "track_name": "junction_UBERON:0001159 total RNA-seq",
+   "raw_score": 1.87109375,
+   "quantile_score": 0.9999241232872009
+  },
+  {
+   "output_type": "SPLICE_JUNCTIONS",
+   "ontology_curie": "UBERON:0001157",
+   "track_name": "junction_UBERON:0001157 total RNA-seq",
+   "raw_score": 1.865234375,
+   "quantile_score": 0.9999188184738159
+  },
+  {
+   "output_type": "SPLICE_JUNCTIONS",
+   "ontology_curie": "UBERON:0001159",
+   "track_name": "junction_UBERON:0001159 gtex Colon_Sigmoid polyA plus RNA-seq",
+   "raw_score": 1.845703125,
+   "quantile_score": 0.9999291300773621
+  },
+  {
+   "output_type": "SPLICE_JUNCTIONS",
+   "ontology_curie": "UBERON:0001159",
+   "track_name": "junction_UBERON:0001159 polyA plus RNA-seq",
+   "raw_score": 1.8447265625,
+   "quantile_score": 0.999951183795929
+  },
+  {
+   "output_type": "SPLICE_JUNCTIONS",
+   "ontology_curie": "UBERON:0001159",
+   "track_name": "junction_UBERON:0001159 polyA plus RNA-seq",
+   "raw_score": 1.7685546875,
+   "quantile_score": 0.9999459385871887
+  },
+  {
+   "output_type": "SPLICE_JUNCTIONS",
+   "ontology_curie": "UBERON:0001159",
+   "track_name": "junction_UBERON:0001159 gtex Colon_Sigmoid polyA plus RNA-seq",
+   "raw_score": 1.6494140625,
+   "quantile_score": 0.9999101758003235
+  },
+  {
+   "output_type": "SPLICE_SITES",
+   "ontology_curie": null,
+   "track_name": "donor",
+   "raw_score": 0.833984375,
+   "quantile_score": 0.9999421834945679
+  },
+  {
+   "output_type": "SPLICE_SITE_USAGE",
+   "ontology_curie": "UBERON:0001157",
+   "track_name": "usage_UBERON:0001157 gtex Colon_Transverse polyA plus RNA-seq",
+   "raw_score": 0.82562255859375,
+   "quantile_score": 0.999981701374054
+  },
+  {
+   "output_type": "SPLICE_SITE_USAGE",
+   "ontology_curie": "UBERON:0001159",
+   "track_name": "usage_UBERON:0001159 polyA plus RNA-seq",
+   "raw_score": 0.81451416015625,
+   "quantile_score": 0.9999823570251465
+  },
+  {
+   "output_type": "SPLICE_SITE_USAGE",
+   "ontology_curie": "UBERON:0001157",
+   "track_name": "usage_UBERON:0001157 total RNA-seq",
+   "raw_score": 0.775146484375,
+   "quantile_score": 0.9999804496765137
+  },
+  {
+   "output_type": "SPLICE_SITE_USAGE",
+   "ontology_curie": "UBERON:0001159",
+   "track_name": "usage_UBERON:0001159 total RNA-seq",
+   "raw_score": 0.76092529296875,
+   "quantile_score": 0.9999760389328003
+  },
+  {
+   "output_type": "SPLICE_SITE_USAGE",
+   "ontology_curie": "UBERON:0001159",
+   "track_name": "usage_UBERON:0001159 gtex Colon_Sigmoid polyA plus RNA-seq",
+   "raw_score": 0.746795654296875,
+   "quantile_score": 0.9999752044677734
+  },
+  {
+   "output_type": "RNA_SEQ",
+   "ontology_curie": "UBERON:0001159",
+   "track_name": "UBERON:0001159 polyA plus RNA-seq",
+   "raw_score": -0.22449278831481934,
+   "quantile_score": -0.9999826550483704
+  },
+  {
+   "output_type": "RNA_SEQ",
+   "ontology_curie": "UBERON:0001159",
+   "track_name": "UBERON:0001159 total RNA-seq",
+   "raw_score": -0.14213871955871582,
+   "quantile_score": -0.9999730587005615
+  },
+  {
+   "output_type": "RNA_SEQ",
+   "ontology_curie": "UBERON:0000059",
+   "track_name": "UBERON:0000059 polyA plus RNA-seq",
+   "raw_score": -0.09308767318725586,
+   "quantile_score": -0.9998989701271057
+  },
+  {
+   "output_type": "RNA_SEQ",
+   "ontology_curie": "UBERON:0001157",
+   "track_name": "UBERON:0001157 gtex Colon_Transverse polyA plus RNA-seq",
+   "raw_score": -0.09292519092559814,
+   "quantile_score": -0.999880313873291
+  },
+  {
+   "output_type": "RNA_SEQ",
+   "ontology_curie": "UBERON:0001159",
+   "track_name": "UBERON:0001159 gtex Colon_Sigmoid polyA plus RNA-seq",
+   "raw_score": -0.08844280242919922,
+   "quantile_score": -0.9998881816864014
+  },
+  {
+   "output_type": "RNA_SEQ",
+   "ontology_curie": "UBERON:0001157",
+   "track_name": "UBERON:0001157 total RNA-seq",
+   "raw_score": -0.07696533203125,
+   "quantile_score": -0.999880313873291
+  },
+  {
+   "output_type": "SPLICE_SITES",
+   "ontology_curie": null,
+   "track_name": "acceptor",
+   "raw_score": 0.0390625,
+   "quantile_score": 0.977263331413269
+  }
+ ]
+}

@@ -450,26 +450,6 @@ def test_stage3_grounded_followup(isolated_kb, monkeypatch):
     assert "PMID 41986348" in body["reply"]
 
 
-def test_colab_recipe(isolated_kb, monkeypatch):
-    monkeypatch.delenv("META_API_KEY", raising=False)
-    monkeypatch.delenv("MUSE_WONDER_API_URL", raising=False)
-    response = client.post(
-        "/copilot/chat",
-        json={"message": "recipe", "action_type": "colab_recipe", "study_id": "s",
-              "cancer_type": "PAAD", "case_id": "c", "variants": SAMPLE_VARIANTS,
-              "history": []},
-    )
-    assert response.status_code == 200
-    body = response.json()
-    assert body["source"] == "fallback"
-    assert "Clinical Recipe Card" in body["reply"]
-    assert body["colab_url"] == (
-        "https://colab.research.google.com/github/DixitPatel/alphagenome_sidecar"
-        "/blob/main/colabs/cancer_variant_cookbook.ipynb"
-    )
-    assert body["colab_url"] in body["reply"]
-
-
 CONTEXTUAL_ACTIONS = ["fail_kinetics", "cdkn2a_tp53_axis", "ras_cellcycle_cooperation",
                       "survival_gap", "tmb_grade_paradox",
                       "pathology_r1_reconciliation", "angioinvasion_failure"]

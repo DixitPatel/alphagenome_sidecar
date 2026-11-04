@@ -14,11 +14,11 @@ import re
 from pathlib import Path
 
 import httpx
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
-from app import sample_trainer
+from app import colab, sample_trainer
 
 # Fix 6: load agentic-setup/.env automatically (never edit the file itself).
 def _load_central_env() -> None:
@@ -59,7 +59,6 @@ ACTION_TYPES = (
     "show_batch_failures",
     "prep_literature_context",
     "query_pubmed",
-    "colab_recipe",
     "fail_kinetics",
     "cdkn2a_tp53_axis",
     "ras_cellcycle_cooperation",
@@ -67,11 +66,6 @@ ACTION_TYPES = (
     "tmb_grade_paradox",
     "pathology_r1_reconciliation",
     "angioinvasion_failure",
-)
-
-COLAB_COOKBOOK_URL = (
-    "https://colab.research.google.com/github/DixitPatel/alphagenome_sidecar"
-    "/blob/main/colabs/cancer_variant_cookbook.ipynb"
 )
 
 # Stage 1 vocabulary: gene symbols always get [tiab], never [mh].
@@ -483,28 +477,6 @@ def _grounded_followup_reply(request: ChatRequest) -> dict:
     }
 
 
-def _colab_recipe_reply(request: ChatRequest) -> dict:
-    genes = [v.hugo_symbol for v in request.variants] or ["(no variants)"]
-    study = request.study_id or "unknown-study"
-    text = (
-        "Clinical Recipe Card — reproducible cancer-variant analysis\n"
-        f"Study {study} ({request.cancer_type or 'n/a'}, case {request.case_id or 'n/a'}), "
-        f"genes: {', '.join(genes)}.\n"
-        "1) Index the sample via POST /copilot/index-sample.\n"
-        "2) Cross-reference genes (cross_reference_genes) for KB bullets.\n"
-        "3) Run Stage 1 query_pubmed for a warning-free Boolean PubMed query.\n"
-        "4) Synthesize abstracts via POST /copilot/synthesize-pmids.\n"
-        "5) Ask grounded follow-ups with ingested_pmids.\n"
-        f"Open the cookbook: {COLAB_COOKBOOK_URL}"
-    )
-    return {
-        "reply": text,
-        "action_type": "colab_recipe",
-        "source": "fallback",
-        "colab_url": COLAB_COOKBOOK_URL,
-    }
-
-
 def _contextual_reply(action: str, request: ChatRequest) -> dict:
     """Rich deterministic handlers for chart/contextual copilot actions."""
     study = request.study_id or "unknown-study"
@@ -826,8 +798,6 @@ def _fallback_reply(request: ChatRequest) -> dict:
             "pubmed_url": pubmed_url,
             "papers": papers,
         }
-    elif action == "colab_recipe":
-        return _colab_recipe_reply(request)
     elif action in (
         "fail_kinetics",
         "cdkn2a_tp53_axis",
@@ -1068,6 +1038,49 @@ def copilot_contextual_chart_query(request: ContextualChartQueryRequest) -> dict
         "source": "fallback",
         "active_tab": request.active_tab,
         "chart_context": request.chart_context,
+    }
+
+
+class ColabParamsRequest(BaseModel):
+    """Colab Cookbook: fill notebook cell 4 for one scored variant."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    variant_id: str
+    # Sample-level OncoTree code (ONCOTREE_CODE); study types can be "mixed".
+    oncotree_code: str | None = None
+    cancer_type: str | None = None
+
+
+@router.post("/colab-params")
+def copilot_colab_params(request: ColabParamsRequest) -> dict:
+    variant_id = request.variant_id.strip()
+    doc = sample_trainer.fetch_annotation(variant_id)
+    if not doc or not doc.get("hg38_variant"):
+        raise HTTPException(
+            status_code=404,
+            detail=f"No AlphaGenome record in Mongo for {variant_id}. Score the variant first.",
+        )
+    requested = request.oncotree_code or request.cancer_type
+    code, entry = _resolve_oncotree(requested)
+    curie = entry.get("default_curie") if entry else None
+    if not curie:
+        raise HTTPException(
+            status_code=422,
+            detail=f"No OncoTree to UBERON mapping for {requested}. Use Map OncoTree first.",
+        )
+    ontology_terms = [curie]
+    gene = doc.get("canonical_gene") or ""
+    scores = colab.summarize_scores(doc, ontology_terms)
+    return {
+        "variant_id": variant_id,
+        "oncotree_code": code,
+        "gene": gene,
+        "hg38_variant": doc["hg38_variant"],
+        "ontology_terms": ontology_terms,
+        "tissue_label": entry.get("default_label", ""),
+        "param_cell": colab.render_param_cell(doc["hg38_variant"], gene, ontology_terms, scores),
+        "colab_url": colab.colab_url(),
     }
 
 
