@@ -54,7 +54,7 @@ def test_notebook_matches_builder():
 
 
 def test_code_cells_parse(code_cells):
-    assert len(code_cells) == 7
+    assert len(code_cells) == 8
     for number, source in enumerate(code_cells, start=1):
         python = "\n".join(
             line for line in source.splitlines() if not line.lstrip().startswith("!")
@@ -80,6 +80,17 @@ def test_cell_4_has_form_fields(code_cells):
     cell_4 = code_cells[3]
     for name in FORM_FIELDS:
         assert re.search(rf"^{name} = .*# @param", cell_4, re.MULTILINE), name
+
+
+def test_cell_8_explain_with_muse(code_cells):
+    cell_8 = code_cells[7]
+    for name in ("question", "reasoning_effort", "summary_window_bp", "show_facts"):
+        assert re.search(rf"^{name} = .*# @param", cell_8, re.MULTILINE), name
+    assert "https://api.meta.ai/v1/chat/completions" in cell_8
+    assert "'muse-wonder-1.0'" in cell_8
+    assert "userdata.get('META_API_KEY')" in cell_8
+    # The key is read at run time, never stored in the notebook.
+    assert "LLM|" not in cell_8
 
 
 def test_notebook_has_no_outputs(code_cells, notebook):
