@@ -1072,7 +1072,13 @@ def copilot_colab_params(request: ColabParamsRequest) -> dict:
     ontology_terms = [curie]
     gene = doc.get("canonical_gene") or ""
     scores = colab.summarize_scores(doc, ontology_terms)
+    # First use: publish the notebook to GitHub if it is not there yet.
+    try:
+        notebook_status = colab.ensure_notebook_published()
+    except colab.ColabPublishError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     return {
+        "notebook_status": notebook_status,
         "variant_id": variant_id,
         "oncotree_code": code,
         "gene": gene,

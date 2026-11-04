@@ -6,9 +6,11 @@ Mongo and is skipped when Mongo is not reachable. No mocks.
 """
 
 import ast
+import base64
 import json
 from pathlib import Path
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -94,9 +96,38 @@ def test_param_cell_matches_notebook_cell_4_fields():
 
 def test_colab_url_follows_env(monkeypatch):
     monkeypatch.delenv("COLAB_NOTEBOOK_REF", raising=False)
-    assert "/blob/w6-muse-copilot/colabs/cancer_variant_cookbook.ipynb" in colab.colab_url()
+    monkeypatch.delenv("COLAB_NOTEBOOK_REPO", raising=False)
+    assert colab.colab_url() == (
+        "https://colab.research.google.com/github/DixitPatel/alphagenome_sidecar"
+        "/blob/w6-muse-copilot/colabs/cancer_variant_cookbook.ipynb"
+    )
     monkeypatch.setenv("COLAB_NOTEBOOK_REF", "main")
-    assert "/blob/main/colabs/" in colab.colab_url()
+    monkeypatch.setenv("COLAB_NOTEBOOK_REPO", "someone/fork")
+    assert "/github/someone/fork/blob/main/colabs/" in colab.colab_url()
+
+
+def test_put_body_carries_the_committed_notebook():
+    raw = colab.NOTEBOOK_FILE.read_bytes()
+    body = colab.put_body(raw, "w6-muse-copilot")
+    assert body["branch"] == "w6-muse-copilot"
+    assert base64.b64decode(body["content"]) == raw
+    assert json.loads(raw)["nbformat"] == 4
+
+
+def _github_reachable() -> bool:
+    try:
+        return httpx.get("https://api.github.com", timeout=5).status_code < 500
+    except httpx.HTTPError:
+        return False
+
+
+@pytest.mark.skipif(not _github_reachable(), reason="GitHub not reachable")
+def test_ensure_notebook_published_existing_file_live(monkeypatch):
+    # Read-only: main has the notebook, so nothing is written.
+    colab._PUBLISHED.clear()
+    monkeypatch.setenv("COLAB_NOTEBOOK_REF", "main")
+    monkeypatch.delenv("COLAB_NOTEBOOK_REPO", raising=False)
+    assert colab.ensure_notebook_published() == "exists"
 
 
 @pytest.mark.skipif(not sample_trainer.mongo_reachable(), reason="Mongo not reachable")
