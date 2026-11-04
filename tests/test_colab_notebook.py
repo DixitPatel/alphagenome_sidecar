@@ -84,11 +84,16 @@ def test_cell_4_has_form_fields(code_cells):
 
 def test_cell_8_explain_with_muse(code_cells):
     cell_8 = code_cells[7]
-    for name in ("question", "reasoning_effort", "summary_window_bp", "show_facts"):
+    for name in ("question", "reasoning_effort", "summary_window_bp", "show_facts",
+                 "use_tools", "cohort_study", "max_tool_rounds"):
         assert re.search(rf"^{name} = .*# @param", cell_8, re.MULTILINE), name
     assert "https://api.meta.ai/v1/chat/completions" in cell_8
     assert "'muse-wonder-1.0'" in cell_8
     assert "userdata.get('META_API_KEY')" in cell_8
+    # Tools load from the same branch that hosts the notebook.
+    ref = _load_builder().NOTEBOOK_REF
+    assert f"alphagenome_sidecar/{ref}/colabs/" in cell_8
+    assert "__NOTEBOOK_REF__" not in cell_8
     # The key is read at run time, never stored in the notebook.
     assert "LLM|" not in cell_8
 

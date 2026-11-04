@@ -1,0 +1,555 @@
+[
+ {
+  "id": "AGDocs:variant_scoring#how-variant-scoring-works",
+  "title": "How variant scoring works",
+  "page": "variant_scoring",
+  "url": "https://www.alphagenomedocs.com/variant_scoring.html#how-variant-scoring-works",
+  "text": "A genomic variant is a difference identified in an individual’s genome sequence when compared to the reference genome sequence. Many genomic variants likely have no appreciable impact, but it can be challenging to identify those that do have a particular molecular effect. AlphaGenome predictions can be used to score variants and help bridge this gap. To do so, the variant is treated as a pair of sequences: reference ( REF ) and alternate ( ALT ). The variant effect is estimated by comparing AlphaGenome predictions for these two sequences across different modalities returned by the model."
+ },
+ {
+  "id": "AGDocs:variant_scoring#detailed-steps",
+  "title": "Detailed steps",
+  "page": "variant_scoring",
+  "url": "https://www.alphagenomedocs.com/variant_scoring.html#detailed-steps",
+  "text": "Variant scoring is implemented as follows:"
+ },
+ {
+  "id": "AGDocs:variant_scoring#make-ref-and-alt-predictions-for-given-modality",
+  "title": "Make REF and ALT predictions for given modality",
+  "page": "variant_scoring",
+  "url": "https://www.alphagenomedocs.com/variant_scoring.html#make-ref-and-alt-predictions-for-given-modality",
+  "text": "Variant scoring begins by generating predictions for both the reference and alternative alleles of a variant, restricted to a given modality of interest (ex: RNA-SEQ , ATAC , etc.). The model input at this stage are REF and ALT sequences, whose sequence interval contains the variant of interest."
+ },
+ {
+  "id": "AGDocs:variant_scoring#optional-perform-indel-alignment",
+  "title": "Optional - perform indel alignment",
+  "page": "variant_scoring",
+  "url": "https://www.alphagenomedocs.com/variant_scoring.html#optional-perform-indel-alignment",
+  "text": "For insertion or deletion (indel) variants, the ALT allele’s prediction profile is aligned to the REF allele’s coordinate space. Inserted bases are summarized by taking the maximum value over the inserted segment, while deleted bases are treated as having zero signal in the ALT context, thereby enabling consistent positional comparisons."
+ },
+ {
+  "id": "AGDocs:variant_scoring#apply-spatial-mask",
+  "title": "Apply spatial mask",
+  "page": "variant_scoring",
+  "url": "https://www.alphagenomedocs.com/variant_scoring.html#apply-spatial-mask",
+  "text": "A spatial mask defines regions of interest within the interval containing the variant. This mask can be centered on the variant or encompass a gene (gene body, exons, or TSS, based on annotations from a GTF file). At this stage, values outside of the mask are discarded."
+ },
+ {
+  "id": "AGDocs:variant_scoring#aggregate-spatially-and-compute-alt-ref",
+  "title": "Aggregate spatially and compute ALT - REF",
+  "page": "variant_scoring",
+  "url": "https://www.alphagenomedocs.com/variant_scoring.html#aggregate-spatially-and-compute-alt-ref",
+  "text": "Aggregation occurs at this stage, which includes the following: reduction along the spatial axis, using mean or sum , etc. (optional) scaling, such as a \\(log\\) or \\(l^2\\) transform. difference between ALT - REF . The final outcome is a single scalar value per track. Note Aggregation logic is encapsulated in the options listed in AggregationType . The naming of the options reflects the order of operations of each of the above steps, with the right-most operation applied first to the model predictions. For example, DIFF_SUM_LOG2 , applies a log transform, then a sum, to track data. It then returns the difference between ALT - REF . Some aggregation options may apply the exact same steps, but in a different order. Regardless of the order of operations, each aggregation type returns one single scalar value per track."
+ },
+ {
+  "id": "AGDocs:variant_scoring#optional-aggregate-tracks",
+  "title": "Optional - aggregate tracks",
+  "page": "variant_scoring",
+  "url": "https://www.alphagenomedocs.com/variant_scoring.html#optional-aggregate-tracks",
+  "text": "After variant scoring is completed, optional track selection and additional aggregation can be applied. Suggestions include additional aggregation (mean, max, sum, etc.) over: All tracks. Subsets of tracks. Or, a single track of interest can be chosen, i.e., from a particular sample."
+ },
+ {
+  "id": "AGDocs:variant_scoring#modality-specific-recommended-variant-scorers",
+  "title": "Modality-specific recommended variant scorers",
+  "page": "variant_scoring",
+  "url": "https://www.alphagenomedocs.com/variant_scoring.html#modality-specific-recommended-variant-scorers",
+  "text": "We have established a set of recommended variant scorers, available via get_recommended_scorers() , covering diverse genomic modalities as outlined below:"
+ },
+ {
+  "id": "AGDocs:variant_scoring#gene-expression-rna-seq",
+  "title": "Gene Expression (RNA-seq)",
+  "page": "variant_scoring",
+  "url": "https://www.alphagenomedocs.com/variant_scoring.html#gene-expression-rna-seq",
+  "text": "Variant scores quantify the impact on overall gene transcript abundance. comparison: predicted RNA coverage between REF and ALT alleles. mask: exons for a gene of interest. aggregation: Log-fold change of gene expression level between the ALT and REF alleles: \\(\\log(mean(ALT) + 0.001) - log(mean(REF) + 0.001)\\) ."
+ },
+ {
+  "id": "AGDocs:variant_scoring#polyadenylation-site-pas-usage",
+  "title": "Polyadenylation Site (PAS) Usage",
+  "page": "variant_scoring",
+  "url": "https://www.alphagenomedocs.com/variant_scoring.html#polyadenylation-site-pas-usage",
+  "text": "This follows Borzoi’s [ Linder et al. , 2025 ] methodology for scoring polyadenylation quantitative trait loci (paQTLs), which captures the variant’s impact on RNA isoform production. comparison: predicted RNA coverage between REF and ALT alleles. mask: local 400-bp windows around 3’ cleavage junctions. aggregation: Maximum absolute log-fold change of isoform ratios (distal/proximal PAS usage) between REF and ALT , considering all proximal/distal splits."
+ },
+ {
+  "id": "AGDocs:variant_scoring#tss-activity-cage-pro-cap",
+  "title": "TSS Activity (CAGE, PRO-cap)",
+  "page": "variant_scoring",
+  "url": "https://www.alphagenomedocs.com/variant_scoring.html#tss-activity-cage-pro-cap",
+  "text": "Variant scores quantify local changes at TSSs. comparison: predicted CAGE or PRO-cap coverage between REF and ALT alleles. mask: local 501-bp window centered at the variant. aggregation: Log2-ratio of summed signals: \\(log2[(sum(ALT) + 1) / (sum(REF) + 1)]\\) ."
+ },
+ {
+  "id": "AGDocs:variant_scoring#chromatin-accessibility-atac-seq-dnase-seq",
+  "title": "Chromatin Accessibility (ATAC-seq, DNase-seq)",
+  "page": "variant_scoring",
+  "url": "https://www.alphagenomedocs.com/variant_scoring.html#chromatin-accessibility-atac-seq-dnase-seq",
+  "text": "Variant scores quantify local accessibility changes. comparison: predicted ATAC-seq or DNase-cap coverage between REF and ALT alleles. mask: local 501-bp window centered at the variant. aggregation: Log2-ratio of summed signals: \\(log2[(sum(ALT) + 1) / (sum(REF) + 1)]\\) ."
+ },
+ {
+  "id": "AGDocs:variant_scoring#transcription-factor-binding-chip-tf",
+  "title": "Transcription Factor Binding (ChIP-TF)",
+  "page": "variant_scoring",
+  "url": "https://www.alphagenomedocs.com/variant_scoring.html#transcription-factor-binding-chip-tf",
+  "text": "Variant scores quantify changes in TF binding intensity. comparison: predicted ChIP-TF coverage between REF and ALT alleles. mask: local 501-bp window centered at the variant. aggregation: Log2-ratio of summed signals: \\(log2[(sum(ALT) + 1) / (sum(REF) + 1)]\\) ."
+ },
+ {
+  "id": "AGDocs:variant_scoring#histone-modifications-chip-histone",
+  "title": "Histone Modifications (ChIP-Histone)",
+  "page": "variant_scoring",
+  "url": "https://www.alphagenomedocs.com/variant_scoring.html#histone-modifications-chip-histone",
+  "text": "Variant scores quantify changes in histone modifications. comparison: predicted ChIP-Histone coverage between REF and ALT alleles. mask: local 2001-bp window centered at the variant. aggregation: Log2-ratio of summed signals: \\(log2[(sum(ALT) + 1) / (sum(REF) + 1)]\\) ."
+ },
+ {
+  "id": "AGDocs:variant_scoring#splicing-splice-sites",
+  "title": "Splicing (Splice Sites)",
+  "page": "variant_scoring",
+  "url": "https://www.alphagenomedocs.com/variant_scoring.html#splicing-splice-sites",
+  "text": "Variant scores quantify changes in the class assignment probabilities (acceptor, donor) at all potential splice sites within a gene body. comparison: class assignment probabilities for REF and ALT alleles. mask: gene body for a gene of interest. aggregation: Maximum absolute difference of predicted splice site probabilities across the gene body: \\(max(|ALT - REF|)\\) ."
+ },
+ {
+  "id": "AGDocs:variant_scoring#splicing-splice-site-usage",
+  "title": "Splicing (Splice Site Usage)",
+  "page": "variant_scoring",
+  "url": "https://www.alphagenomedocs.com/variant_scoring.html#splicing-splice-site-usage",
+  "text": "Variant scores quantify changes in the usage of splice sites (i.e., increased or decreased fractions). comparison: predicted splice site usage between REF and ALT alleles. mask: gene body for a gene of interest. aggregation: Maximum absolute difference of predicted splice site usage across the gene body: \\(max(|ALT - REF|)\\) ."
+ },
+ {
+  "id": "AGDocs:variant_scoring#splicing-splice-junctions",
+  "title": "Splicing (Splice Junctions)",
+  "page": "variant_scoring",
+  "url": "https://www.alphagenomedocs.com/variant_scoring.html#splicing-splice-junctions",
+  "text": "Variant scores quantify changes in the predicted RNA-seq reads spanning a junction, which is a function of both expression level, splice site usage and splicing efficiency. comparison: predicted paired junction counts between REF and ALT alleles. mask: top-k splice sites for a gene of interest (including annotated and predicted splice sites). aggregation: Maximum absolute log-fold change of predicted junction counts across splice site pairs of interest: \\(max(|log(ALT) - log(REF)|)\\) ."
+ },
+ {
+  "id": "AGDocs:variant_scoring#d-genome-contact-contact-maps",
+  "title": "3D Genome Contact (Contact Maps)",
+  "page": "variant_scoring",
+  "url": "https://www.alphagenomedocs.com/variant_scoring.html#d-genome-contact-contact-maps",
+  "text": "Variant scores quantify local contact disruption. comparison: predicted contact frequencies between REF and ALT alleles. mask: local 1MB window centered at the variant. aggregation: Mean absolute difference of contact frequencies, for all interactions involving the variant-containing bin."
+ },
+ {
+  "id": "AGDocs:variant_scoring#active-allele-scorers",
+  "title": "Active Allele Scorers",
+  "page": "variant_scoring",
+  "url": "https://www.alphagenomedocs.com/variant_scoring.html#active-allele-scorers",
+  "text": "In addition to the differential scores described above, we also provide scoring configurations that capture the absolute activity level associated with one of the alleles, rather than quantifying the change between REF and ALT . This is calculated by taking the maximum of the aggregated signals from the REF and ALT alleles over the masked central window or gene region. We provide recommended active allele scorers for the following modalities: Gene expression (RNA-seq): \\(max(mean(ALT), mean(REF))\\) across exons for a gene of interest. TSS activity (CAGE, PRO-cap): \\(max(sum(ALT), sum(REF))\\) within a local 501-bp window centered at the variant. Chromatin Accessibility (ATAC-seq, DNase-seq): \\(max(sum(ALT), sum(REF))\\) within a local 501-bp window centered at the variant. Transcription Factor binding (ChIP-TF): \\(max(sum(ALT), sum(REF))\\) within a local 501-bp window centered at the variant. Histone modifications (ChIP-Histone): \\(max(sum(ALT), sum(REF))\\) within a local 2001-bp window centered at the variant."
+ },
+ {
+  "id": "AGDocs:variant_scoring#available-variant-scorers",
+  "title": "Available variant scorers",
+  "page": "variant_scoring",
+  "url": "https://www.alphagenomedocs.com/variant_scoring.html#available-variant-scorers",
+  "text": "For more on the types of variant scorers and how they work, visit the API documentation . For a hands-on tutorial on scoring variants on their splicing effect, see the splicing variant scoring notebook ."
+ },
+ {
+  "id": "AGDocs:faqs#how-do-i-make-predictions-for-a-specific-genomic-region",
+  "title": "How do I make predictions for a specific genomic region?",
+  "page": "faqs",
+  "url": "https://www.alphagenomedocs.com/faqs.html#how-do-i-make-predictions-for-a-specific-genomic-region",
+  "text": "You can define any region in either the human or mouse genome, and use the API to predict various outputs. See the quick start Colab for a demonstration."
+ },
+ {
+  "id": "AGDocs:faqs#how-do-i-specify-a-genomic-region",
+  "title": "How do I specify a genomic region?",
+  "page": "faqs",
+  "url": "https://www.alphagenomedocs.com/faqs.html#how-do-i-specify-a-genomic-region",
+  "text": "Using the genome.Interval class, which is initialized with a chromosome, a start, and an end position. Note AlphaGenome classes such as genome.Interval uses 0-based indexing, consistent with the underlying Python implementations. This means an genome.Interval includes the base pair at the start position up to the base pair at the end-1 position. For example, to specify the first base pair of chromosome 1, use genome.Interval('chr1', 0, 1) . This interval has a width of 1, and contains only the base pair at the first position of chromosome 1. To interpret interval overlaps, remember that 0-based indexing excludes the base pair at the end position itself, such that genome.Interval('chr1', 0, 1).overlaps(genome.Interval('chr1', 1, 2)) returns False ."
+ },
+ {
+  "id": "AGDocs:faqs#what-are-the-reference-genome-versions-used-by-the-model",
+  "title": "What are the reference genome versions used by the model?",
+  "page": "faqs",
+  "url": "https://www.alphagenomedocs.com/faqs.html#what-are-the-reference-genome-versions-used-by-the-model",
+  "text": "We use human genome assembly hg38 (GRCh38.p13.genome.fa) and mouse assembly mm10 (GRCm38.p6.genome.fa). For other genome builds (such as hg19, for example), the LiftOver tool can be used to convert from hg38 coordinates to the desired assembly."
+ },
+ {
+  "id": "AGDocs:faqs#can-i-make-a-prediction-for-any-arbitrary-dna-sequence",
+  "title": "Can I make a prediction for any arbitrary DNA sequence?",
+  "page": "faqs",
+  "url": "https://www.alphagenomedocs.com/faqs.html#can-i-make-a-prediction-for-any-arbitrary-dna-sequence",
+  "text": "Yes, you can make predictions for any sequence, provided it is within the range of sequence lengths supported by the model. Note that model predictions have only been evaluated using sequences that vary by a relatively small amount from the reference genome (SNPs and indels), so very large differences from the human reference genome (for example, structural variants, sequences with a large amount of padding, synthetic sequences, or artificial DNA constructs) may result in predictions that are not as reliable."
+ },
+ {
+  "id": "AGDocs:faqs#can-i-make-predictions-for-dna-from-other-species",
+  "title": "Can I make predictions for DNA from other species?",
+  "page": "faqs",
+  "url": "https://www.alphagenomedocs.com/faqs.html#can-i-make-predictions-for-dna-from-other-species",
+  "text": "Yes, with the caveat that the model has only been trained on mouse and human DNA. Prediction quality is likely to degrade as evolutionary distance from these two species increases, but note that this has not been formally benchmarked."
+ },
+ {
+  "id": "AGDocs:faqs#what-is-the-longest-sequence-the-model-can-take-as-input",
+  "title": "What is the longest sequence the model can take as input?",
+  "page": "faqs",
+  "url": "https://www.alphagenomedocs.com/faqs.html#what-is-the-longest-sequence-the-model-can-take-as-input",
+  "text": "1MB (precisely 2^20 base-pairs long). Other sequence lengths are also supported: ~16KB, ~100KB, ~500KB. We recommend where possible to make predictions at 1MB for the best possible results."
+ },
+ {
+  "id": "AGDocs:faqs#how-do-i-request-predictions-for-a-sequence-with-a-length-that-is-not-in-the-list-of-supported-lengths",
+  "title": "How do I request predictions for a sequence with a length that is not in the list of supported lengths?",
+  "page": "faqs",
+  "url": "https://www.alphagenomedocs.com/faqs.html#how-do-i-request-predictions-for-a-sequence-with-a-length-that-is-not-in-the-list-of-supported-lengths",
+  "text": "You can use genome.Interval.resize to crop or expand your sequence length to the nearest supported length. Note that .resize expands sequences using the actual surrounding genomic data, not by adding padding."
+ },
+ {
+  "id": "AGDocs:faqs#how-many-tracks-are-there-per-output-type-and-what-do-they-represent",
+  "title": "How many tracks are there per output type and what do they represent?",
+  "page": "faqs",
+  "url": "https://www.alphagenomedocs.com/faqs.html#how-many-tracks-are-there-per-output-type-and-what-do-they-represent",
+  "text": "This varies from 5 to over 600. Each of the tracks refers to a particular cell-type or tissue, as well as other properties, such as strand or a specific transcription factor (for the CHIP_TF output type). See the output metadata documentation for a full list of the output types."
+ },
+ {
+  "id": "AGDocs:faqs#how-do-i-find-out-what-tissue-or-cell-type-an-output-track-refers-to",
+  "title": "How do I find out what tissue or cell-type an output ‘track’ refers to?",
+  "page": "faqs",
+  "url": "https://www.alphagenomedocs.com/faqs.html#how-do-i-find-out-what-tissue-or-cell-type-an-output-track-refers-to",
+  "text": "Using the navigating data ontologies notebook , you can look at the output metadata where biosample names and ontology CURIEs (IDs) for each track are described."
+ },
+ {
+  "id": "AGDocs:faqs#what-is-an-ontology-curie",
+  "title": "What is an ontology CURIE?",
+  "page": "faqs",
+  "url": "https://www.alphagenomedocs.com/faqs.html#what-is-an-ontology-curie",
+  "text": "CURIEs (Compact Uniform Resource Identifiers) are standardized, abbreviated codes (e.g., ‘UBERON:0001114’ for liver) that uniquely identify specific ontology terms."
+ },
+ {
+  "id": "AGDocs:faqs#where-are-your-ontology-curies-sourced-from",
+  "title": "Where are your ontology CURIEs sourced from?",
+  "page": "faqs",
+  "url": "https://www.alphagenomedocs.com/faqs.html#where-are-your-ontology-curies-sourced-from",
+  "text": "We source these from the IDs provided in the source training data. We also restricted the ontology types to UBERON, CL, CLO and EFO, following ENCODE practices. We recommend using EBI’s Ontology Lookup Service to understand relationships between the ontology IDs for different tracks."
+ },
+ {
+  "id": "AGDocs:faqs#what-is-strandedness",
+  "title": "What is strandedness?",
+  "page": "faqs",
+  "url": "https://www.alphagenomedocs.com/faqs.html#what-is-strandedness",
+  "text": "DNA is double-stranded, meaning that there are two nucleotide strands that form the double helix. By convention, one of those molecules is designated the forward, or positive strand (5’->3’), and the other is designated the reverse, or negative strand (3’->5’). Genomic assays can either be unstranded or stranded (also called strand-specific). Unstranded assays return results that do not distinguish whether a measurement came from the positive or negative strand. Certain assays do not generate stranded information – for example, ATAC-seq generates unstranded accessibility information. Stranded (or strand-specific) assays annotate each measurement as coming from the positive or negative strand. This is important for transcriptional assays to distinguish between strand-specific transcripts (for example, two transcripts that share a transcriptional start site but are on different strands). Note Not all RNA-seq samples will be stranded, especially those that are from older experiments. For example, GTEx RNA-seq data is unstranded. For more general information about the difference between non-stranded and stranded protocols and how to interpret them, there is a helpful tutorial here ."
+ },
+ {
+  "id": "AGDocs:faqs#how-is-strandedness-handled-in-model-outputs",
+  "title": "How is strandedness handled in model outputs?",
+  "page": "faqs",
+  "url": "https://www.alphagenomedocs.com/faqs.html#how-is-strandedness-handled-in-model-outputs",
+  "text": "In the model output metadata, we use the following symbols to designate the strand of a track: positive: + negative: - unstranded . For assays that were performed in a stranded (or strand-specific) manner, the assay will have two tracks per cell or tissue type: one for the positive ( + ) and another for the negative ( - ) strand. For unstranded assays, there will be a single track per cell or tissue type, annotated as unstranded ( . ). We provide convenience operations for manipulating TrackData based on strand information, such as filter_to_negative_strand() , etc."
+ },
+ {
+  "id": "AGDocs:faqs#how-can-i-save-the-model-outputs",
+  "title": "How can I save the model outputs?",
+  "page": "faqs",
+  "url": "https://www.alphagenomedocs.com/faqs.html#how-can-i-save-the-model-outputs",
+  "text": "For variant effect predictions : We recommend converting the scores into a pandas DataFrame. This DataFrame can then be easily exported to a common file format, such as a CSV file, for use with other tools or for record-keeping. Specific instructions and examples for this process are provided in our ‘Variant Scoring UI’ tutorial. For genome track predictions (e.g., RNA-seq levels) : The predicted track data is provided as NumPy arrays within TrackData objects. These arrays can be directly saved to disk using standard NumPy functions, such as numpy.save (for saving a single array to a .npy file) or numpy.savez_compressed (for saving multiple arrays into a single compressed .npz file)."
+ },
+ {
+  "id": "AGDocs:faqs#what-are-some-of-the-limitations-of-the-model",
+  "title": "What are some of the limitations of the model?",
+  "page": "faqs",
+  "url": "https://www.alphagenomedocs.com/faqs.html#what-are-some-of-the-limitations-of-the-model",
+  "text": "AlphaGenome has several key limitations: Tissue-specificity and long-range interactions : While AlphaGenome shows improvements in these areas compared to previous models, accurately capturing tissue-specific effects and long-range genomic interactions remains challenging for deep learning models in genomics, requiring further research. Species scope : The model is trained and evaluated on human and mouse DNA. Its performance on DNA from other species has not been determined. Personal genomes : The model has not yet been benchmarked for predicting individual (personal) human genomes. Molecular scope : AlphaGenome predicts the molecular consequences of genetic variations. Its direct applicability to complex trait analysis is limited, as these traits also involve broader biological processes (e.g., gene function, development, environmental factors) beyond the model’s primary focus. Unphased training and single sequence input : The model processes a single DNA sequence at a time and is therefore not inherently ‘diploid-aware’. It was trained using unphased data, meaning it could not learn to distinguish between alleles inherited from the mother versus the father. Consequently, its variant effect predictions do not inherently model heterozygous states (i.e., the presence of both a reference and a variant allele at a site simultaneously)."
+ },
+ {
+  "id": "AGDocs:faqs#how-do-i-visualize-the-predicted-output",
+  "title": "How do I visualize the predicted output?",
+  "page": "faqs",
+  "url": "https://www.alphagenomedocs.com/faqs.html#how-do-i-visualize-the-predicted-output",
+  "text": "You can use any tool to visualize the numerical output, but we provide a Python visualization library so you can easily visualize the output immediately. You can use our visualization basics guide and see examples of how to plot different modalities in our visualizing predictions tutorial ."
+ },
+ {
+  "id": "AGDocs:faqs#can-i-design-my-own-visualizations-to-work-with-this-library",
+  "title": "Can I design my own visualizations to work with this library?",
+  "page": "faqs",
+  "url": "https://www.alphagenomedocs.com/faqs.html#can-i-design-my-own-visualizations-to-work-with-this-library",
+  "text": "Yes. The returned figures are based on matplotlib, so should be extendible. Additionally, you can choose to work with the raw output data and design your own visualizations."
+ },
+ {
+  "id": "AGDocs:faqs#where-are-the-plotted-transcript-annotations-from",
+  "title": "Where are the plotted transcript annotations from?",
+  "page": "faqs",
+  "url": "https://www.alphagenomedocs.com/faqs.html#where-are-the-plotted-transcript-annotations-from",
+  "text": "Transcript annotations are sourced from standard Gene Transfer Format (GTF) files from GENCODE: the hg38 reference assembly (release 46) for human and the mm10 reference assembly (release M23) for mouse."
+ },
+ {
+  "id": "AGDocs:faqs#am-i-limited-to-only-plotting-protein-coding-genes-and-only-the-longest-transcript",
+  "title": "Am I limited to only plotting protein-coding genes, and only the longest transcript?",
+  "page": "faqs",
+  "url": "https://www.alphagenomedocs.com/faqs.html#am-i-limited-to-only-plotting-protein-coding-genes-and-only-the-longest-transcript",
+  "text": "No. If you wish to include other gene types or all transcripts (not just the longest), you can remove the respective calls to gene_annotation.filter_protein_coding(gtf) and gene_annotation.filter_to_longest_transcript(gtf) in your code. Note that including more transcripts can make the plot appear busy; you can adjust the fig_height parameter of the TranscriptAnnotation plot component to improve legibility."
+ },
+ {
+  "id": "AGDocs:faqs#how-to-score-splicing-variants",
+  "title": "How to score splicing variants",
+  "page": "faqs",
+  "url": "https://www.alphagenomedocs.com/faqs.html#how-to-score-splicing-variants",
+  "text": "We recommend combining the three splicing-related variant scorers from AlphaGenome into a single score as described in the paper: Splice sites : Quantifies changes in splice site class assignment probabilities (donor, acceptor) between ALT and REF alleles. Splice site usage : Quantifies changes in the relative usage of splice sites between ALT and REF alleles. Splice junctions : Quantifies log-fold changes in the predicted splice junction counts between ALT and REF alleles. For each scorer, the effect is aggregated across all tissues and genes by taking the maximum absolute score across all tracks and genes. The merged splicing score is then computed as: \\(\\text{alphagenome\\_splicing} = \\max(\\text{splice\\_sites}) + \\max(\\text{splice\\_site\\_usage}) + \\max(\\text{splice\\_junctions}) / 5\\) This is the approach used in the AlphaGenome paper to score ClinVar variants for missplicing. This is the recommended method to assess whether a variant causes aberrant splicing. See the splicing variant scoring notebook for a step-by-step tutorial."
+ },
+ {
+  "id": "AGDocs:faqs#how-do-i-define-a-variant",
+  "title": "How do I define a variant?",
+  "page": "faqs",
+  "url": "https://www.alphagenomedocs.com/faqs.html#how-do-i-define-a-variant",
+  "text": "By creating a Variant object. Note As mentioned above, AlphaGenome classes such as Variant use 0-indexing, and Variant’s start() and end() contain 0-indexed values. However, most variants in public databases, such as dbSNP, are provided as 1-indexed. To enable compatibility with these annotations, the Variant object is initialized with a 1-indexed position attribute, which is then converted to 0-indexing internally. (i.e., start() returns position - 1). See the Variant docstring for more details."
+ },
+ {
+  "id": "AGDocs:faqs#are-there-tools-to-help-me-define-variants-and-run-inference-for-them",
+  "title": "Are there tools to help me define variants, and run inference for them?",
+  "page": "faqs",
+  "url": "https://www.alphagenomedocs.com/faqs.html#are-there-tools-to-help-me-define-variants-and-run-inference-for-them",
+  "text": "See the scoring and visualizing a single variant notebook which walks through how to define a Variant object and perform inference. Batch inference over many variants can be performed using the batch variant scoring notebook which takes a variant call file (VCF) as input. For scoring variants specifically on their splicing effect, see the splicing variant scoring notebook ."
+ },
+ {
+  "id": "AGDocs:faqs#can-i-pass-any-sequence-to-reference-bases-or-does-it-have-to-match-the-reference-genome-sequence-at-the-variant-location",
+  "title": "Can I pass any sequence to reference_bases or does it have to match the reference genome sequence at the variant location?",
+  "page": "faqs",
+  "url": "https://www.alphagenomedocs.com/faqs.html#can-i-pass-any-sequence-to-reference-bases-or-does-it-have-to-match-the-reference-genome-sequence-at-the-variant-location",
+  "text": "You can pass any sequence to reference_bases . Note that predict_variant() is agnostic to the alleles in the reference genome, but rather uses the REF/ALT alleles specified by the user."
+ },
+ {
+  "id": "AGDocs:faqs#are-variant-predictions-for-insertions-and-deletions-indels-supported",
+  "title": "Are variant predictions for insertions and deletions (indels) supported?",
+  "page": "faqs",
+  "url": "https://www.alphagenomedocs.com/faqs.html#are-variant-predictions-for-insertions-and-deletions-indels-supported",
+  "text": "Yes. We use left-alignment to specify indels. See Variant for more details. For scoring indels, we adopt SpliceAI’s [ Jaganathan et al. , 2019 ] indel alignment strategy: inserted bases are summarized by taking the maximum value over the inserted segment, while deleted bases are treated as having zero signal in the ALT context, thereby enabling consistent positional comparisons."
+ },
+ {
+  "id": "AGDocs:faqs#which-variant-scorer-should-i-use-for-a-given-modality",
+  "title": "Which variant scorer should I use for a given modality?",
+  "page": "faqs",
+  "url": "https://www.alphagenomedocs.com/faqs.html#which-variant-scorer-should-i-use-for-a-given-modality",
+  "text": "In practice, you can use most variant scoring strategies for any modality. However, we provide a recommendation for the best strategies based on our evaluations in the variant scoring documentation ."
+ },
+ {
+  "id": "AGDocs:faqs#can-i-write-my-own-variant-scoring-strategy",
+  "title": "Can I write my own variant scoring strategy?",
+  "page": "faqs",
+  "url": "https://www.alphagenomedocs.com/faqs.html#can-i-write-my-own-variant-scoring-strategy",
+  "text": "We do not currently support users writing their own variant scoring strategy. However, since variant scoring is simply aggregating REF and ALT track predictions, you can write your own methods for handling these values."
+ },
+ {
+  "id": "AGDocs:faqs#what-is-the-difference-between-a-quantile-score-and-raw-score",
+  "title": "What is the difference between a ‘quantile_score’ and ‘raw_score’?",
+  "page": "faqs",
+  "url": "https://www.alphagenomedocs.com/faqs.html#what-is-the-difference-between-a-quantile-score-and-raw-score",
+  "text": "The ‘raw_score’ is the output for a particular variant scoring strategy. However, different tracks and modalities yield scores that are on different scales. For instance, the Splice Sites Usage scorer returns values between 0 and 1, whereas the Gene Expression (RNA-seq) scorer returns negative or positive values without bounds. To facilitate comparisons across tracks and different variant scoring strategies, we use an empirical quantiles approach (see [ Avsec et al. , 2026 ] for full details). Briefly, we estimate a background distribution for each variant scorer and track using scores for common variants (MAF>0.01 in any GnomAD v3 population). We can then convert any ‘raw score’ into a ‘quantile score’, representing its rank within this background distribution. E.g. a variant with a quantile score of 0.99 has a score equivalent to the 99th percentile of common variants. This provides a measure of predicted impact that is standardized to the same scale across different variant scorers and tracks. The maximum (or minimum) value never exceeds 0.999990 (or -0.999990), due to the number of variants used to compute the quantiles (~300K). Because of this, we recommend using quantile scores as an indicator of whether the raw score is unusually large, and use the ‘raw scores’ as a measure of magnitude of the effect for a given scorer and track. For signed variant scores (which indicate effect direction like up-regulation or down-regulation), their [0,1] quantile probabilities – derived directly from the rank order of the original signed raw scores – are linearly transformed to a [-1,1] range. This rescaling ensures the quantile score reflects the directionality of the raw score. For instance, the 0th percentile (representing the most negative raw scores) maps to -1, the 50th percentile (raw scores around zero) to 0, and the 100th percentile (most positive raw scores) to +1. Note that quantile scores are only available for the suite of recommended scorers."
+ },
+ {
+  "id": "AGDocs:faqs#how-do-i-convert-splicing-variant-scores-to-percent-spliced-in-psi-values",
+  "title": "How do I convert splicing variant scores to Percent Spliced In (PSI) values?",
+  "page": "faqs",
+  "url": "https://www.alphagenomedocs.com/faqs.html#how-do-i-convert-splicing-variant-scores-to-percent-spliced-in-psi-values",
+  "text": "AlphaGenome’s splicing variant scorers predict splice site usage and splice junction counts, but they do not directly output Percent Spliced In (PSI) values. However, you can derive PSI3/5 values from predicted splicing scores. See the Deriving PSI values Colab for a tutorial and details on how to compute PSI values from AlphaGenome outputs."
+ },
+ {
+  "id": "AGDocs:faqs#can-i-predict-the-combined-effect-of-multiple-variants-in-a-haplotype",
+  "title": "Can I predict the combined effect of multiple variants in a haplotype?",
+  "page": "faqs",
+  "url": "https://www.alphagenomedocs.com/faqs.html#can-i-predict-the-combined-effect-of-multiple-variants-in-a-haplotype",
+  "text": "Yes. Although the standard API takes a single variant at a time, you can analyze the combined effect of multiple variants on the same haplotype by constructing alternative sequences containing all variants of interest and comparing the predictions to those of the individual variants. See the Haplotype analysis Colab for an example workflow demonstrating this approach."
+ },
+ {
+  "id": "AGDocs:faqs#what-terms-of-use-apply-to-alphagenome-outputs",
+  "title": "What terms of use apply to AlphaGenome outputs?",
+  "page": "faqs",
+  "url": "https://www.alphagenomedocs.com/faqs.html#what-terms-of-use-apply-to-alphagenome-outputs",
+  "text": "AlphaGenome is subject to the AlphaGenome Terms of Service . Other than as expressly provided in the AlphaGenome Terms of Service (see references to Permissive Use Downloadable Artifacts for Commercial and Non-Commercial Use), outputs generated by AlphaGenome and other information provided in AlphaGenome Atlas are for non-commercial use only and should not be used for the training of other machine learning models. Predictions are for theoretical modelling and research purposes only. They must not be used for clinical decision-making or relied upon for medical or other professional advice."
+ },
+ {
+  "id": "AGDocs:faqs#is-alphagenome-available-for-commercial-use",
+  "title": "Is AlphaGenome available for commercial use?",
+  "page": "faqs",
+  "url": "https://www.alphagenomedocs.com/faqs.html#is-alphagenome-available-for-commercial-use",
+  "text": "Yes. You can access AlphaGenome for commercial and enterprise workflows on Google Cloud via Model Garden on Gemini Enterprise Agent Platform"
+ },
+ {
+  "id": "AGDocs:faqs#how-should-i-cite-alphagenome",
+  "title": "How should I cite AlphaGenome?",
+  "page": "faqs",
+  "url": "https://www.alphagenomedocs.com/faqs.html#how-should-i-cite-alphagenome",
+  "text": "If you use AlphaGenome in your research, please cite using: If you use AlphaGenome Atlas website or scores, please cite:"
+ },
+ {
+  "id": "AGDocs:faqs#who-should-i-contact-with-issues-enquiries-and-feedback",
+  "title": "Who should I contact with issues, enquiries and feedback?",
+  "page": "faqs",
+  "url": "https://www.alphagenomedocs.com/faqs.html#who-should-i-contact-with-issues-enquiries-and-feedback",
+  "text": "Submit bugs and any code-related issues on GitHub . For general feedback, questions about usage, and/or feature requests, please use the community forum – it’s actively monitored by our team so you’re likely to find answers and insights faster. If you can’t find what you’re looking for, please get in touch with the AlphaGenome team at alphagenome @ google . com and we will be happy to assist you with questions. We’re working hard to answer all inquiries but there may be a short delay in our response due to the high volume we are receiving. For any questions about commercial use, please get in touch with your Google Cloud account rep or email the team at alphagenome-cloud-external @ google . com ."
+ },
+ {
+  "id": "AGDocs:exploring_model_metadata#model-output-metadata",
+  "title": "Model output metadata",
+  "page": "exploring_model_metadata",
+  "url": "https://www.alphagenomedocs.com/exploring_model_metadata.html#model-output-metadata",
+  "text": "AlphaGenome returns predictions for 11 different output types, covering a variety of modalities. Here we provide details about the human model outputs and associated metadata to help users make informed decisions about the parameters of their API requests (e.g., ontology term; output types). For further details on dataset processing and precise definitions of each output type, including their respective units and normalization methods, please refer to the Methods section of the AlphaGenome paper. Table 1 : Descriptions of output types predicted by AlphaGenome. OutputType name Description Units Resolution Unique biosamples Total tracks RNA_SEQ RNA expression as measured by RNA-seq. Includes a mixture of PolyA+ RNA and Total RNA assays. Some tracks are also stranded. Normalized read signal 1bp 285 667 CAGE RNA expression at transcription start-sites as measured by Cap Analysis Gene Expression (CAGE) assay. Normalized read signal 1bp 264 546 PROCAP RNA expression at transcription start-sites as measured by Precision Run-On sequencing and capping (PROCAP) assay. Normalized read signal 1bp 6 12 DNASE Chromatin accessibility as measured by DNase I hypersensitive sites sequencing (DNase-seq) assay. Normalized insertion signal 1bp 305 305 ATAC Chromatin accessibility as measured by the transposase-accessible chromatin (ATAC-seq) assay. Normalized insertion signal 1bp 167 167 CHIP_HISTONE Relative abundance of histone modification marks as measured by chromatin immunoprecipitation (ChIP-seq) for 24 different markers e.g. H3k27ac (see ENCODE documentation ). Fold-change over control (summed per 128 bp bin) 128bp 219 1116 CHIP_TF Relative abundance of DNA-bound transcription factors as measured by ChIP-seq targeting 43 different proteins (see ENCODE documentation ). Fold-change over control (summed per 128 bp bin) 128bp 163 1617 SPLICE_SITES Predicted location of donor or acceptor splice sites, for both the positive and negative strand, expressed as a probability (higher numbers indicate higher probability of the base being a splice site). Predicted probability 1bp NA 4 SPLICE_JUNCTIONS Splice junction spliced read counts, as measured by RNA-Seq. Predictions are for all possible pairings of at most 512 donors and 512 acceptors from each strand in the requested interval, where the position of donors and acceptors along the input sequence is given by predictions of splice site positions. Normalized junction signal 1bp 282 734 SPLICE_SITE_USAGE Fraction of transcripts using a splice site, as measured by RNA-seq. All reads that span a given splice site are considered, and we predict the fraction of these that use the site (donor or acceptor). Fraction 1bp 282 734 CONTACT_MAPS Relative frequency of physical contact between pairwise positions (symmetric), derived from chromatin contact maps (Micro-C and Hi-C assays). Values are coarse-grained and normalized by removing the off-diagonal power law decay (as also done in Zhou, J. 2022 ). Log-fold over genomic distance-based expectation 2048bp 12 28"
+ },
+ {
+  "id": "AGDocs:exploring_model_metadata#track-metadata",
+  "title": "Track metadata",
+  "page": "exploring_model_metadata",
+  "url": "https://www.alphagenomedocs.com/exploring_model_metadata.html#track-metadata",
+  "text": "To access the metadata describing each track for human outputs use: Each predicted output type (e.g., RNA_SEQ) contains metadata in a DataFrame : output_metadata.rna_seq Each row of the DataFrame corresponds to a ‘track’, and each column contains key information for biological interpretation such as: name : Name of the track. Example: CL:0000047 polyA plus RNA-seq . strand Strand of the track, either positive ( + ), negative ( - ), or unstranded ( . ). ontology_curie : A string ID representing the ontology term corresponding to the biosample. Example: CL:0000100 . biosample_name : Plain text description of the biosample. Example: motor neuron . For a full list of metadata columns available for each output type, please see the navigating data ontologies notebook , which demonstrates how to access and browse track metadata. Note For SPLICE_JUNCTION outputs the strand information is a property of a junction rather than a track, so the metadata for this output type will show half as many rows as reported in the above table."
+ },
+ {
+  "id": "AGDocs:exploring_model_metadata#additional-track-metadata",
+  "title": "Additional track metadata",
+  "page": "exploring_model_metadata",
+  "url": "https://www.alphagenomedocs.com/exploring_model_metadata.html#additional-track-metadata",
+  "text": "Some output types contain additional columns. For example, OutputMetadata.rna_seq and OutputMetadata.splice_sites also contain a gtex_tissue column, which is populated for the tracks that make predictions for the tissues sampled in the GTEx project Consortium [ 2020 ] . Note For one tissue, ’Brain - Cerebellar hemisphere’, we used an alternative Uberon ID to that was provided in the GTEx documentation (‘UBERON:0002037’), to reflect Uberon’s ID for cerebellar hemisphere: ‘UBERON:0002245’ ."
+ },
+ {
+  "id": "AGDocs:visualization_library_basics#visualization-basics",
+  "title": "Visualization basics",
+  "page": "visualization_library_basics",
+  "url": "https://www.alphagenomedocs.com/visualization_library_basics.html#visualization-basics",
+  "text": "AlphaGenome predicts a variety of output types with different data shapes and biological interpretations ( table ). We provide alphagenome.visualization to generate matplotlib figures from model API outputs, which we outline here. Tip See the visualizing predictions tutorial for worked examples of plotting different modalities."
+ },
+ {
+  "id": "AGDocs:visualization_library_basics#plot",
+  "title": "Plot",
+  "page": "visualization_library_basics",
+  "url": "https://www.alphagenomedocs.com/visualization_library_basics.html#plot",
+  "text": "The key function, plot() , takes as input a list of components and returns a matplotlib.figure.Figure ."
+ },
+ {
+  "id": "AGDocs:visualization_library_basics#components",
+  "title": "Components",
+  "page": "visualization_library_basics",
+  "url": "https://www.alphagenomedocs.com/visualization_library_basics.html#components",
+  "text": "A component is a light wrapper around a model output (such as predicted genomic tracks, splice junctions, etc) and specifies plot aesthetics. Each component maps to one vertically stacked subplot in the final figure (see blue text in the figure ). Each component has an independent y-axis but shares a common x-axis, corresponding to the length of the DNA interval, in base pairs (bp). Several default components are available, each designed to best visually represent different modalities and data shapes returned by the model API (see table )."
+ },
+ {
+  "id": "AGDocs:visualization_library_basics#annotations",
+  "title": "Annotations",
+  "page": "visualization_library_basics",
+  "url": "https://www.alphagenomedocs.com/visualization_library_basics.html#annotations",
+  "text": "Additional figure elements specific to the DNA interval, but outside of components – such as locations of promoters or variants – can be overlaid via a list of annotations that are passed to plot() ."
+ },
+ {
+  "id": "AGDocs:visualization_library_basics#custom-plotting",
+  "title": "Custom plotting",
+  "page": "visualization_library_basics",
+  "url": "https://www.alphagenomedocs.com/visualization_library_basics.html#custom-plotting",
+  "text": "For users interested in configuring novel components, extend the AbstractComponent() and AbstractAnnotation() base classes. Any other data supplied by the user can be visualized using this library as is, as long as it is provided to plot_components in the format required e.g. TrackData for Tracks . Illustrative diagram of visualization library. Blue text indicates plot_components classes, and purple text indicates arguments to plot_components that adjust figure-wide aesthetics Plotting components and annotation classes. Component name plot_components.* Description Example figure Data shape supported Recommended model outputs Good for visualising variants? Tracks A line-plot visualizing a scalar value at each genomic position (or coarser resolution) e.g. predictions of RNA_SEQ for a specific Colab cell 1D All except SPLICE_JUNCTIONS; CONTACT_MAPS No OverlaidTracks A line-plot as for Tracks, but with two separate lines on the same axis with different colors e.g. predictions of RNA_SEQ for the Reference and Alternative sequence defined by a variant. Colab cell 1D x 2 All except SPLICE_JUNCTIONS; CONTACT_MAPS Yes Sashimi A series of arcs, each representing a scalar value for a pair of genomic positions (e.g. splice junctions). The thickness of the arcs are determined by the relative sizes of the scalars. Colab cell 2D (sparse) SPLICE_JUNCTIONS Yes SeqLogo A sequence of letters (bases) with heights corresponding to a single scalar value per genomic position (e.g. from contribution scores). Colab cell 1D + sequence ISM contribution scores Yes ContactMaps A heatmap visualizing a matrix of scalars (e.g. predicted DNA-DNA contacts), one for each pair of genomic positions in an interval. Colab cell 2D CONTACT_MAPS No ContactMapsDiff A heatmap as for ContactMaps, but with a diverging color map centered on zero (white) to represent values derived from differences (e.g. ALT - REF) Colab cell 2D CONTACT_MAPS Yes TranscriptAnnotation Horizontal lines representing locations of transcripts. Exons, introns, untranslated regions, and direction of transcription are indicated by differences in line thickness. Colab cell Interval(s) N/A No VariantAnnotation A semi-transparent rectangle (or vertical line if a variant) spanning all plot components, indicating the location of an interval (or variant). The interval (variant) is optionally labeled. Colab cell Interval(s) or Variant(s) N/A Yes AbstractComponent This is an abstract class, which is the parent class of most plot_components.*. A user can define their own component class, provided it adheres to the structure specified by AbstractComponent. The workhorse method is plot_ax(), which populates a matplotlib.axes.Axes object with visuals defined by the input data. N/A N/A N/A N/A"
+ },
+ {
+  "id": "AGDocs:splicing_variant_scoring#scoring-variants-on-their-splicing-effect",
+  "title": "Scoring variants on their splicing effect",
+  "page": "splicing_variant_scoring",
+  "url": "https://www.alphagenomedocs.com/colabs/v1/splicing_variant_scoring.html#scoring-variants-on-their-splicing-effect",
+  "text": "This notebook demonstrates how to score genetic variants on their splicing effect using AlphaGenome. This is the approach used in the AlphaGenome paper to score ClinVar variants for missplicing, and is the recommended method to assess whether a variant is causing aberrant splicing. We use the “merged splicing” approach, which combines three splicing-related variant scorers into a single score: Splice sites : Quantifies changes in splice site class assignment probabilities (donor, acceptor) between ALT and REF alleles. Splice site usage : Quantifies changes in the relative usage of splice sites between ALT and REF alleles. Splice junctions : Quantifies changes in the predicted splice junction usage between ALT and REF alleles. The merged splicing score is computed as (described in the paper): This weighting scheme gives full weight to changes in splice site identity and usage, but a smaller weight to junction-level changes because their magnitude is larger. Tip Open this tutorial in Google Colab for interactive viewing."
+ },
+ {
+  "id": "AGDocs:splicing_variant_scoring#define-the-splicing-variant-scorers",
+  "title": "Define the splicing variant scorers",
+  "page": "splicing_variant_scoring",
+  "url": "https://www.alphagenomedocs.com/colabs/v1/splicing_variant_scoring.html#define-the-splicing-variant-scorers",
+  "text": "AlphaGenome provides three variant scorers related to splicing: GeneMaskSplicingScorer with OutputType.SPLICE_SITES : Measures changes in splice site classification probabilities (donor, acceptor, neither). GeneMaskSplicingScorer with OutputType.SPLICE_SITE_USAGE : Measures changes in splice site usage levels. SpliceJunctionScorer : Measures changes in splice junction predictions. We can access these from the recommended scorers dictionary:"
+ },
+ {
+  "id": "AGDocs:splicing_variant_scoring#score-a-single-variant",
+  "title": "Score a single variant",
+  "page": "splicing_variant_scoring",
+  "url": "https://www.alphagenomedocs.com/colabs/v1/splicing_variant_scoring.html#score-a-single-variant",
+  "text": "Let’s score a variant near a known splice site. We use a 1MB sequence length, as this provides the best predictions for gene-level scoring."
+ },
+ {
+  "id": "AGDocs:splicing_variant_scoring#compute-the-merged-splicing-score",
+  "title": "Compute the merged splicing score",
+  "page": "splicing_variant_scoring",
+  "url": "https://www.alphagenomedocs.com/colabs/v1/splicing_variant_scoring.html#compute-the-merged-splicing-score",
+  "text": "The merged splicing score combines the three individual splicing scores. For each scorer, we take the maximum absolute score across all genes and tracks, then combine them with the following weights: Splice sites : weight = 1.0 Splice site usage : weight = 1.0 Splice junctions : weight = 0.2 (i.e. divided by 5) This combination captures both the disruption of splice site identity and the downstream effect on junction usage."
+ },
+ {
+  "id": "AGDocs:splicing_variant_scoring#score-a-batch-of-variants",
+  "title": "Score a batch of variants",
+  "page": "splicing_variant_scoring",
+  "url": "https://www.alphagenomedocs.com/colabs/v1/splicing_variant_scoring.html#score-a-batch-of-variants",
+  "text": "You can score multiple variants and compute the merged splicing score for each:"
+ },
+ {
+  "id": "AGDocs:splicing_variant_scoring#score-interpretation",
+  "title": "Score interpretation",
+  "page": "splicing_variant_scoring",
+  "url": "https://www.alphagenomedocs.com/colabs/v1/splicing_variant_scoring.html#score-interpretation",
+  "text": "The score is in theory unbounded from 0 to infinity. Because the splice junction scorer is computing log fold change. However, emperically the majority of variants are in the range [0, 6] . We are working on a recommended variant score cutoff. We see in practice variants with score > 1.0 generally have large effect."
+ },
+ {
+  "id": "AGDocs:deriving_PSI_values#deriving-psi3-5-values-from-splicing-scores",
+  "title": "Deriving PSI3/5 values from splicing scores",
+  "page": "deriving_PSI_values",
+  "url": "https://www.alphagenomedocs.com/colabs/v1/deriving_PSI_values.html#deriving-psi3-5-values-from-splicing-scores",
+  "text": "This notebook demonstrates how to derive Percentage Spliced In (PSI) values from predicted splice junction counts. PSI_5 typically refers to the usage of a 5’ splice site (donor) relative to alternative donors, while PSI_3 refers to the usage of a 3’ splice site (acceptor)."
+ },
+ {
+  "id": "AGDocs:deriving_PSI_values#score-a-variant",
+  "title": "Score a variant",
+  "page": "deriving_PSI_values",
+  "url": "https://www.alphagenomedocs.com/colabs/v1/deriving_PSI_values.html#score-a-variant",
+  "text": "Score a variant near a known splice site: There are 107 unique junctions predicted across 2 tracks in this tissue: There are two tracks because splice junction counts are predicted from RNA-seq data, and there are two types of RNA-seq data available for ‘CL:0000084’: polyA RNA-seq for mature mRNA splicing because it enriches for fully processed transcripts. Total RNA-seq captures pre-mRNA and nascent transcripts, which can sometimes look “messier” because splicing is still in progress."
+ },
+ {
+  "id": "AGDocs:deriving_PSI_values#derive-the-psi-values",
+  "title": "Derive the PSI values",
+  "page": "deriving_PSI_values",
+  "url": "https://www.alphagenomedocs.com/colabs/v1/deriving_PSI_values.html#derive-the-psi-values",
+  "text": "Create a function to calculate PSI values from splice junction counts for either RNA track: Select RNA track and calculate:"
+ },
+ {
+  "id": "AGDocs:deriving_PSI_values#visualise-sashimi-plot",
+  "title": "Visualise Sashimi plot",
+  "page": "deriving_PSI_values",
+  "url": "https://www.alphagenomedocs.com/colabs/v1/deriving_PSI_values.html#visualise-sashimi-plot",
+  "text": "As we are considering splicing, we may want to plot more than just protein coding and MANE transcripts. Choose a relevant extractor, but be aware that including all possible transcripts can result in a crowded annotation: Build the Sashimi plot. The numbers above the junctions in the Sashimi plot are the predicted normalised read counts per donor/acceptor pair (quantitative signal strength). These are NOT the PSI values (proportions):"
+ },
+ {
+  "id": "AGDocs:tissue_ontology_mapping#navigating-data-ontologies",
+  "title": "Navigating data ontologies",
+  "page": "tissue_ontology_mapping",
+  "url": "https://www.alphagenomedocs.com/colabs/v1/tissue_ontology_mapping.html#navigating-data-ontologies",
+  "text": "Tip Open this tutorial in Google Colab for interactive viewing."
+ },
+ {
+  "id": "AGDocs:tissue_ontology_mapping#interactively-view-output-metadata",
+  "title": "Interactively view output metadata",
+  "page": "tissue_ontology_mapping",
+  "url": "https://www.alphagenomedocs.com/colabs/v1/tissue_ontology_mapping.html#interactively-view-output-metadata",
+  "text": "First, we load the model. Click Filter on the upper right hand side of the interactive dataframe and type a cell or tissue name like “brain” into the Search by all fields box to find the ontology_curie term corresponding to a tissue and output type of interest:"
+ },
+ {
+  "id": "AGDocs:tissue_ontology_mapping#how-many-tracks-are-there-per-output-type",
+  "title": "How many tracks are there per output type?",
+  "page": "tissue_ontology_mapping",
+  "url": "https://www.alphagenomedocs.com/colabs/v1/tissue_ontology_mapping.html#how-many-tracks-are-there-per-output-type",
+  "text": "Note that PROCAP outputs are not available for mouse."
+ },
+ {
+  "id": "AGDocs:example_analysis_workflow#example-analysis-workflow-tal1-locus",
+  "title": "Example analysis workflow: TAL1 locus",
+  "page": "example_analysis_workflow",
+  "url": "https://www.alphagenomedocs.com/colabs/v1/example_analysis_workflow.html#example-analysis-workflow-tal1-locus",
+  "text": "Goal: We will explore non-coding T-cell acute lymphoblastic leukemia associated mutations near the TAL1 locus. T-cell acute lymphoblastic leukemia (T-ALL) is a cancer of the blood and bone marrow. A large fraction of T-ALL cases arise due to aberrant upregulation of the TAL1 oncogene. In particular, the locus harbors positions in which non-coding variants can occur that activate TAL1 gene expression from several kilobases away. Key activities: Visualize the genomic context of variants of interest. Predict the functional impact of a specific variant on gene expression, accessibility, and histone marks. Systematically compare the predicted effects of known disease-associated variants to a set of background variants. Tip Open this tutorial in Google Colab for interactive viewing."
+ },
+ {
+  "id": "AGDocs:example_analysis_workflow#imports",
+  "title": "Imports",
+  "page": "example_analysis_workflow",
+  "url": "https://www.alphagenomedocs.com/colabs/v1/example_analysis_workflow.html#imports",
+  "text": "We load gene annotations from GENCODE, a public repository of gene information, using annotations with the highest level of experimental support (Transcript Support Level ‘1’). We further define a few utility functions that we’ll use throughout the notebook."
+ },
+ {
+  "id": "AGDocs:example_analysis_workflow#assembling-variant-data",
+  "title": "Assembling variant data",
+  "page": "example_analysis_workflow",
+  "url": "https://www.alphagenomedocs.com/colabs/v1/example_analysis_workflow.html#assembling-variant-data",
+  "text": "To get a sense of where these variants lie, we will visualize the variants in the table above in a ~30kb interval centered around the TAL1 gene. From the plot, we can see that the TAL1 gene is transcribed from right to left as it is on the (-) strand. From right to left, we see three positional groups: a cluster of several 5’ variants upstream of TAL1 ( Mansour et al. 2014 , Liu et al. 2017 ). This is also called the MuTE (“mutation of the TAL1 enhancer”) site. an intronic variant ( Liu et al. 2020 ). a 3’ cluster of two variants downstream of TAL1 ( Smith et al. 2023 ). In the original studies, all three variant groups were shown to converge on a common mechanism: upregulation of the TAL1 oncogene."
+ },
+ {
+  "id": "AGDocs:example_analysis_workflow#exploring-individual-variant-outcomes",
+  "title": "Exploring individual variant outcomes",
+  "page": "example_analysis_workflow",
+  "url": "https://www.alphagenomedocs.com/colabs/v1/example_analysis_workflow.html#exploring-individual-variant-outcomes",
+  "text": "Next, let’s plot the predicted effect of one of these variants. To make predictions relevant to a specific biological context, we provide the model with an ontology term. Here, we use CL:0001059' which corresponds to “common myeloid progenitor, CD34-positive” . This is a close match to the tissue-of-origin reported in Mansour et al. 2014 (“purified normal hematopoietic stem cell samples (CD34)”), which used purified hematopoietic stem cells based on CD34 marker expression. To make predictions, we’ll specify the interval (resized to an input sequence length of 2^20 = 1,048,576 bp). We’ll also pass in our requested_outputs field, which indicates to the model to predict three types of outputs: RNA-seq (a measure of gene expression), DNase-seq (a measure of DNA accessibility), and ChIP-Histone (a measure of histone modifications, which can indicate active or repressed chromatin states). We will use some of the plotting tools provided with the alphagenome.visualization package to build our plot. This plot shows the difference between model predictions for the alternate sequence (in which in alternate_bases , “CCGTTTCCTAACC”, have been inserted into the genome at chromosome 1, position 47239296) and the reference sequence. Interpreting this plot, we can see that: RNA-seq coverage is above the horizontal, meaning that TAL1 is increased in the presence of the alternate sequence relative to the reference sequence. DNase-seq indicate changing accessibility near the site of the variant, and increased accessibility near the transcription start site of TAL1 . An increase in H3K27ac and H3K4me1 centered directly on the variant’s location, which mark active enhancers. An increase in H3K4me3 near the transcription start site of TAL1 , which mark active promoters. An increase in H3K36me3 over the gene body, which mark actively transcribed genes. A decrease in H3K27me3 and H3K9me3, which are associated with silencing. Taken together, the model predicts the variant creates a de novo active enhancer element that activates the TAL1 promoter, leading to robust gene transcription."
+ },
+ {
+  "id": "AGDocs:example_analysis_workflow#comparing-predicted-tal1-expression-change-for-cancer-associated-variants-compared-to-randomly-shuffled-variants",
+  "title": "Comparing predicted TAL1 expression change for cancer associated variants, compared to randomly shuffled variants",
+  "page": "example_analysis_workflow",
+  "url": "https://www.alphagenomedocs.com/colabs/v1/example_analysis_workflow.html#comparing-predicted-tal1-expression-change-for-cancer-associated-variants-compared-to-randomly-shuffled-variants",
+  "text": "Next, we will compare TAL1 expression changes for these cancer associated mutations, with synthetic, shuffled mutations at those same positions. To do this, we will: Generate a set of shuffled background variants. Use score_variant to return a scalar value for each variant corresponding to the magnitude of predicted TAL1 gene expression change in the presence of the alternate allele (relevative to the referenece allele). Plot the predicted TAL1 expression change, comparing background variants to cancer associated ones. The shuffled background variants will be matched to cancer associated variants, grouped by position and the length of the alternate_bases . The scores contain values for all genes in the interval, and all RNA-seq tracks in the model output. We’ll filter down to TAL1 and CD34-positive cells. Finally, we’ll loop through each group and make a plot. Now we can pick a plot and visualize. Each plot indicates the predicted expression level of a group of variants. In these plots, the y-axis is the change in TAL1 expression in the presence of the alternative allele relative to the reference allele. Across the x-axis, there are three visualizations: A density plot of TAL1 expression of shuffled variants (gray) The individual TAL1 expression data points for the shuffled variants underlying the density plot (gray). The individual TAL1 expression data points for the cancer associated variants in the group (orange). Here are a few examples:"
+ }
+]
