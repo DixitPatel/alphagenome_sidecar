@@ -118,8 +118,29 @@ def test_put_body_carries_the_committed_notebook():
 
 
 def _github_reachable() -> bool:
+    """Probe the exact endpoint the publisher uses, with the same auth.
+
+    The API root answers 200 even where the repo path is blocked or rate
+    limited, so probing the root proves nothing. 200 means the notebook is
+    there; 404 means reachable and authorized but absent, which the test
+    handles. Anything else (401, 403, 429) means we cannot do this check here.
+    """
     try:
-        return httpx.get("https://api.github.com", timeout=5).status_code < 500
+        headers = {
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+        token = colab.github_token()
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        response = httpx.get(
+            f"{colab.GITHUB_API}/repos/{colab.DEFAULT_NOTEBOOK_REPO}"
+            f"/contents/{colab.NOTEBOOK_PATH}",
+            params={"ref": "main"},
+            headers=headers,
+            timeout=5,
+        )
+        return response.status_code in (200, 404)
     except httpx.HTTPError:
         return False
 
