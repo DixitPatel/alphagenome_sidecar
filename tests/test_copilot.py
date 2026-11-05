@@ -368,6 +368,7 @@ def test_stage1_query_pubmed_fallback(isolated_kb, monkeypatch):
 
     assert "query_pubmed" in copilot_router.ACTION_TYPES
     assert "[mh]" not in copilot_router._build_pubmed_query(["KRAS"], "PAAD").lower().replace("[tiab]", "")
+    monkeypatch.setattr(copilot_router, "_icite_metrics", lambda *a, **k: {})
     monkeypatch.delenv("META_API_KEY", raising=False)
     monkeypatch.delenv("MUSE_WONDER_API_URL", raising=False)
     _force_pubmed_offline(monkeypatch)
@@ -380,10 +381,11 @@ def test_stage1_query_pubmed_fallback(isolated_kb, monkeypatch):
     assert response.status_code == 200
     body = response.json()
     assert body["source"] == "fallback"
-    assert "KRAS[tiab]" in body["query"]
-    assert "[mh]" not in body["query"]
-    assert body["query"].count("AND") >= 2  # 3-part Boolean
-    assert body["pubmed_url"].startswith("https://pubmed.ncbi.nlm.nih.gov/")
+    # The raw Boolean query is deliberately NOT returned to the client.
+    assert "query" not in body
+    # No variant is scored and none is a splice change, so there are no
+    # context genes to build a query from.
+    assert body["genes"] == []
     pmids = [p["pmid"] for p in body["papers"]]
     assert "41986348" in pmids and "38291024" in pmids
     for paper in body["papers"]:
@@ -394,6 +396,9 @@ def test_stage1_free_text_literature(isolated_kb, monkeypatch):
     monkeypatch.delenv("META_API_KEY", raising=False)
     monkeypatch.delenv("MUSE_WONDER_API_URL", raising=False)
     _force_pubmed_offline(monkeypatch)
+    from app import copilot_router
+
+    monkeypatch.setattr(copilot_router, "_icite_metrics", lambda *a, **k: {})
     response = client.post(
         "/copilot/chat",
         json={"message": "find literature on KRAS for this case", "study_id": "s",
@@ -403,7 +408,9 @@ def test_stage1_free_text_literature(isolated_kb, monkeypatch):
     assert response.status_code == 200
     body = response.json()
     assert body["source"] == "fallback"
-    assert "query" in body and "papers" in body and "pubmed_url" in body
+    assert "query" not in body
+    assert "papers" in body and "pubmed_url" in body
+    assert "latest" in body and "cited" in body
     assert any(p["pmid"] == "41986348" for p in body["papers"])
 
 

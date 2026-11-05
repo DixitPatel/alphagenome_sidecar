@@ -12,6 +12,8 @@ import json
 import logging
 import os
 import re
+import threading
+import time
 from pathlib import Path
 
 import httpx
@@ -105,20 +107,80 @@ ACTION_TYPES = (
 )
 
 # Stage 1 vocabulary: gene symbols always get [tiab], never [mh].
-_CANCER_TERMS = (
-    "pancreatic cancer",
-    "pancreatic adenocarcinoma",
-    "pancreatic ductal adenocarcinoma",
-    "neoplasm",
-    "tumor",
-    "carcinoma",
+#
+# Every clause below is AND-ed. Terms inside a clause are OR-ed synonyms of ONE
+# concept. Never mix a specific term into an OR group with generic ones: a
+# generic member satisfies the clause on its own and the clause stops filtering.
+# That was the original bug -- the sample's cancer type sat in an OR group with
+# "tumor"/"carcinoma", and the modality group's "variant"/"mutation"/"genomics"
+# matched ~910k papers, so neither clause narrowed anything.
+
+# Synonym expansion for a resolved cancer type. Keys are matched case-folded
+# against the sample-level type; the first substring hit wins.
+# OncoTree codes reach here whenever the sample carries ONCOTREE_CODE, so each
+# entry is keyed by code AND by name. Codes are matched whole-string (an
+# "OV" substring would otherwise hit "OVARIAN", "SEROUS OVARIAN", ...).
+_CANCER_CODES: dict[str, str] = {
+    "LUAD": "lung adenocarcinoma",
+    "LUSC": "lung squamous",
+    "SCLC": "small cell lung",
+    "NSCLC": "lung adenocarcinoma",
+    "PAAD": "pancrea",
+    "PDAC": "pancrea",
+    "BRCA": "breast",
+    "COAD": "colorectal",
+    "READ": "colorectal",
+    "SKCM": "melanoma",
+    "GBM": "glioma",
+    "LGG": "glioma",
+    "OV": "ovarian",
+    "PRAD": "prostate",
+    "LIHC": "hepatocellular",
+    "HCC": "hepatocellular",
+    "KIRC": "renal",
+    "STAD": "gastric",
+    "HNSC": "head and neck",
+    "HNSCC": "head and neck",
+}
+
+_CANCER_SYNONYMS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("lung adenocarcinoma", ("lung adenocarcinoma", "LUAD", "non-small cell lung", "NSCLC")),
+    ("lung squamous", ("lung squamous cell carcinoma", "LUSC", "non-small cell lung", "NSCLC")),
+    ("small cell lung", ("small cell lung carcinoma", "SCLC")),
+    ("lung", ("lung cancer", "lung carcinoma", "lung neoplasm")),
+    ("pancrea", ("pancreatic cancer", "pancreatic adenocarcinoma", "pancreatic ductal adenocarcinoma", "PDAC")),
+    ("breast", ("breast cancer", "breast carcinoma")),
+    ("colorectal", ("colorectal cancer", "colorectal carcinoma", "CRC")),
+    ("melanoma", ("melanoma", "cutaneous melanoma")),
+    ("glioma", ("glioma", "glioblastoma", "GBM")),
+    ("ovarian", ("ovarian cancer", "ovarian carcinoma")),
+    ("prostate", ("prostate cancer", "prostate adenocarcinoma")),
+    ("hepatocellular", ("hepatocellular carcinoma", "HCC", "liver cancer")),
+    ("renal", ("renal cell carcinoma", "RCC", "kidney cancer")),
+    ("gastric", ("gastric cancer", "gastric adenocarcinoma")),
+    ("head and neck", ("head and neck squamous cell carcinoma", "HNSCC")),
 )
-_MODALITY_TERMS = (
-    "AlphaGenome",
+
+# Study-level placeholders that are not a usable PubMed term. Emitting these
+# ("mixed"[tiab]) is worse than emitting no cancer clause at all.
+_CANCER_PLACEHOLDERS = frozenset(
+    {"mixed", "mixed cancer types", "pancan", "pan-cancer", "other", "nos", "unknown", ""}
+)
+
+# Modality clause, chosen from the lead variant's consequence.
+_MODALITY_SPLICING = (
     "splicing",
-    "variant",
-    "mutation",
-    "genomics",
+    "splice site",
+    "exon skipping",
+    "aberrant splicing",
+    "cryptic splice",
+)
+_MODALITY_CODING = (
+    "missense",
+    "protein function",
+    "structural variant",
+    "driver mutation",
+    "oncogenic",
 )
 
 # Stage 2: cached abstracts so synthesis works offline / in CI.
@@ -191,6 +253,11 @@ class VariantRef(BaseModel):
     variant_id: str = Field(default="", validation_alias=AliasChoices("variant_id", "variantId"))
     hugo_symbol: str = Field(default="UNKNOWN", validation_alias=AliasChoices("hugo_symbol", "hugoGeneSymbol", "gene"))
     protein_change: str | None = Field(default=None, validation_alias=AliasChoices("protein_change", "proteinChange"))
+    score_level: str | None = Field(default=None, validation_alias=AliasChoices("score_level", "scoreLevel"))
+    merged_splicing_score: float | None = Field(
+        default=None,
+        validation_alias=AliasChoices("merged_splicing_score", "mergedSplicingScore"),
+    )
 
 
 class IndexSampleRequest(BaseModel):
@@ -274,25 +341,137 @@ def _gene_clause(genes: list[str]) -> str:
     return "(" + " OR ".join(f"{g}[tiab]" for g in dict.fromkeys(symbols)) + ")"
 
 
+_SCORE_RANK = {"strong": 3, "moderate": 2, "weak": 1, "none": 0}
+
+
+_GENE_CONTEXT_MAX = 8
+
+
+def context_genes(variants: list) -> list[tuple[str, bool]]:
+    """Scored genes for the query, as ``(symbol, is_splice)``, best first.
+
+    There is no lead gene. The genes are context: every one of them is OR-ed
+    into the gene clause, and the cancer type and mechanism clauses are what
+    make the query specific.
+
+    Only genes AlphaGenome actually scored (strong/moderate) qualify. That is
+    the whole filter -- it keeps the clause far shorter than the full mutation
+    list, so passengers in long genes (DNAH8, HMCN1, ...) stay out, without
+    promoting any single gene to a status the score cannot support.
+    """
+    ranked = sorted(
+        (
+            v
+            for v in variants
+            if getattr(v, "score_level", None)
+            and str(v.score_level).lower() in ("strong", "moderate")
+        ),
+        key=lambda v: (
+            _SCORE_RANK.get(str(v.score_level).lower(), 0),
+            abs(getattr(v, "merged_splicing_score", 0.0) or 0.0),
+        ),
+        reverse=True,
+    )
+    out: list[tuple[str, bool]] = []
+    seen: set[str] = set()
+    for v in ranked:
+        symbol = (v.hugo_symbol or "").strip()
+        if not symbol or symbol.upper() == "UNKNOWN" or symbol in seen:
+            continue
+        seen.add(symbol)
+        out.append((symbol, _is_splice_change(v.protein_change)))
+        if len(out) >= _GENE_CONTEXT_MAX:
+            break
+    if out:
+        return out
+    # Nothing scored: fall back to any splice-annotated gene in the table.
+    for v in variants:
+        symbol = (getattr(v, "hugo_symbol", "") or "").strip()
+        if (
+            symbol
+            and symbol.upper() != "UNKNOWN"
+            and symbol not in seen
+            and _is_splice_change(getattr(v, "protein_change", None))
+        ):
+            seen.add(symbol)
+            out.append((symbol, True))
+        if len(out) >= _GENE_CONTEXT_MAX:
+            break
+    return out
+
+
+def _is_splice_change(protein_change: str | None) -> bool:
+    """True when the protein annotation marks a splice-region consequence."""
+    return "splice" in str(protein_change or "").lower()
+
+
+def cancer_terms(cancer_type: str | None) -> tuple[str, ...]:
+    """Synonyms for a sample-level cancer type, or () for a placeholder.
+
+    Returning () drops the cancer clause entirely. That is deliberate: a
+    study-level placeholder such as "mixed" is not a PubMed term, and emitting
+    it would silently return nothing.
+    """
+    raw = str(cancer_type or "").strip()
+    if raw.casefold() in _CANCER_PLACEHOLDERS:
+        return ()
+    folded = raw.casefold()
+    needle = _CANCER_CODES.get(raw.upper())
+    if needle:
+        folded = needle
+    for candidate, synonyms in _CANCER_SYNONYMS:
+        if candidate in folded:
+            return synonyms
+    return (raw,)
+
+
+def _clause(terms) -> str:
+    return "(" + " OR ".join(f"{t}[tiab]" for t in dict.fromkeys(terms)) + ")"
+
+
+def build_pubmed_query(
+    genes: str | list[str] | None,
+    cancer_type: str | None,
+    is_splice: bool,
+    rung: int = 0,
+) -> str | None:
+    """AND-ed clauses: gene AND cancer AND modality. None when unbuildable.
+
+    ``rung`` walks the widening ladder when a narrower pool is too thin:
+      0 = gene AND cancer AND modality
+      1 = gene AND modality      (drop cancer)
+      2 = gene AND cancer        (drop modality)
+    Callers must report which rung produced a result; never present a widened
+    set as the narrow one.
+    """
+    if isinstance(genes, str):
+        genes = [genes]
+    genes = [g for g in (genes or []) if g and g.strip()]
+    if not genes:
+        return None
+    parts = [_clause(genes)]
+    cancer = cancer_terms(cancer_type)
+    modality = _MODALITY_SPLICING if is_splice else _MODALITY_CODING
+    if rung == 0:
+        if cancer:
+            parts.append(_clause(cancer))
+        parts.append(_clause(modality))
+    elif rung == 1:
+        parts.append(_clause(modality))
+    elif rung == 2:
+        if not cancer:
+            return None
+        parts.append(_clause(cancer))
+    return " AND ".join(parts)
+
+
+# Back-compat shim: older callers/tests import the private names.
 def _build_pubmed_query(
     genes: list[str],
     cancer_type: str | None = None,
     message: str = "",
 ) -> str:
-    """Warning-free 3-part Boolean query: GENE[tiab] AND cancer AND modality."""
-    target_genes = genes
-    if message:
-        tokens = {t.upper() for t in re.findall(r"\b[A-Za-z0-9_-]{2,12}\b", message)}
-        mentioned = [g for g in genes if g.upper() in tokens]
-        if mentioned:
-            target_genes = mentioned
-    gene_part = _gene_clause(target_genes)
-    cancer_bits = [f"{t}[tiab]" for t in _CANCER_TERMS]
-    if cancer_type and cancer_type.strip():
-        cancer_bits.insert(0, f"{cancer_type.strip()}[tiab]")
-    cancer_part = "(" + " OR ".join(cancer_bits) + ")"
-    modality_part = "(" + " OR ".join(f"{t}[tiab]" for t in _MODALITY_TERMS) + ")"
-    return f"{gene_part} AND {cancer_part} AND {modality_part}"
+    return build_pubmed_query(genes, cancer_type, True, 0) or _gene_clause(genes)
 
 
 def _pubmed_url(query: str) -> str:
@@ -305,26 +484,56 @@ def _ncbi_api_key() -> str | None:
     return os.environ.get("NCBI_API_KEY") or None
 
 
-def _esearch_pubmed(query: str, retmax: int = 5) -> list[str] | None:
-    """Return PMIDs via esearch, or None when offline / on any error."""
+# NCBI allows 3 requests/second per IP without an API key, 10 with one.
+# pubmed_sections issues up to 7 eutils calls for one click; unthrottled they
+# burst past the limit and the errors surface as empty sections, not failures.
+_EUTILS_LOCK = threading.Lock()
+_EUTILS_LAST = [0.0]
+
+
+def _eutils_throttle() -> None:
+    min_interval = 0.11 if _ncbi_api_key() else 0.36
+    with _EUTILS_LOCK:
+        wait = min_interval - (time.monotonic() - _EUTILS_LAST[0])
+        if wait > 0:
+            time.sleep(wait)
+        _EUTILS_LAST[0] = time.monotonic()
+
+
+def _esearch_pubmed(
+    query: str, retmax: int = 5, sort: str = "relevance"
+) -> list[str] | None:
+    """Return PMIDs via esearch, or None when offline / on any error.
+
+    ``sort`` matters: eutils defaults to most-recently-added, which returns the
+    newest slice of the pool rather than the best of it.
+    """
     try:
         params: dict[str, str] = {
             "db": "pubmed",
             "term": query,
             "retmode": "json",
             "retmax": str(retmax),
+            "sort": sort,
         }
         api_key = _ncbi_api_key()
         if api_key:
             params["api_key"] = api_key
-        with httpx.Client(timeout=8.0) as client:
-            response = client.get(
-                "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi",
-                params=params,
-            )
-            response.raise_for_status()
-            data = response.json()
-        idlist = (data.get("esearchresult") or {}).get("idlist") or []
+        data = None
+        for attempt in range(2):
+            _eutils_throttle()
+            with httpx.Client(timeout=8.0) as client:
+                response = client.get(
+                    "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi",
+                    params=params,
+                )
+                response.raise_for_status()
+                data = response.json()
+            if (data.get("esearchresult") or {}).get("idlist"):
+                break
+            if attempt == 0:
+                time.sleep(0.5)
+        idlist = ((data or {}).get("esearchresult") or {}).get("idlist") or []
         pmids = [str(p) for p in idlist if str(p).strip()]
         return pmids or None
     except Exception:
@@ -388,12 +597,186 @@ def _fallback_papers() -> list[dict]:
     return papers
 
 
+_ICITE_URL = "https://icite.od.nih.gov/api/pubs"
+_CITED_POOL = 30
+_SECTION_SIZE = 5
+_MIN_POOL = 10
+
+
+def _icite_metrics(pmids: list[str]) -> dict[str, dict]:
+    """Citation counts + RCR from NIH iCite. {} on any error.
+
+    PubMed/eutils carries no citation data, so citation ranking needs this
+    second call. iCite is NIH-run, free and keyless, so it keeps the same
+    provenance story as PubMed itself.
+    """
+    if not pmids:
+        return {}
+    try:
+        with httpx.Client(timeout=8.0) as client:
+            response = client.get(_ICITE_URL, params={"pmids": ",".join(pmids)})
+            response.raise_for_status()
+            data = response.json()
+        return {str(x["pmid"]): x for x in (data.get("data") or []) if x.get("pmid")}
+    except Exception:
+        return {}
+
+
+def rank_most_cited(pmids: list[str], metrics: dict[str, dict], size: int = _SECTION_SIZE) -> list[str]:
+    """Order a relevance pool by citation count, densest first.
+
+    RCR is the better signal but is None until a paper has a citation window,
+    so it cannot rank the current year at all. Raw count is used for the
+    ordering and RCR is carried through for display only.
+    """
+    return sorted(
+        pmids,
+        key=lambda pid: (metrics.get(pid, {}).get("citation_count") or 0),
+        reverse=True,
+    )[:size]
+
+
+def _search_one(
+    genes: list[str], cancer_type: str | None, is_splice: bool, sort: str, retmax: int
+) -> tuple[str | None, list[str], int]:
+    """Run the query, widening only if a rung returns too thin a pool."""
+    best: tuple[str, list[str], int] | None = None
+    for rung in (0, 1, 2):
+        query = build_pubmed_query(genes, cancer_type, is_splice, rung)
+        if not query:
+            continue
+        pool = _esearch_pubmed(query, retmax=retmax, sort=sort) or []
+        if len(pool) >= _MIN_POOL:
+            return query, pool, rung
+        # Keep the widest result seen, with its own rung, so a widened set is
+        # never labelled as the narrow query.
+        if best is None or len(pool) > len(best[1]):
+            best = (query, pool, rung)
+    return best if best else (None, [], 0)
+
+
+def _search_genes(
+    gene_specs: list[tuple[str, bool]], cancer_type: str | None, sort: str
+) -> tuple[str | None, list[str], int, bool]:
+    """Search the context genes, fanning out per gene only when needed.
+
+    One OR-ed query covers every gene and costs a single eutils call, which is
+    the common case. When that pool is too thin -- a rare gene drags the whole
+    clause down, or the genes have different mechanisms -- each gene is queried
+    on its own with its own mechanism clause and the pools are merged.
+
+    Returns (query, pmids, rung, fanned_out). ``query`` is the combined query;
+    on a fan-out it is the one whose link best represents the set.
+    """
+    if not gene_specs:
+        return None, [], 0, False
+    genes = [g for g, _ in gene_specs]
+    any_splice = any(s for _, s in gene_specs)
+
+    query, pool, rung = _search_one(
+        genes, cancer_type, any_splice, sort, _CITED_POOL
+    )
+    if len(pool) >= _MIN_POOL:
+        return query, pool, rung, False
+
+    # Fan out. Interleave the per-gene hits so one prolific gene cannot fill
+    # every slot before a rarer one is represented.
+    per_gene: list[list[str]] = []
+    worst_rung = rung
+    for gene, gene_splice in gene_specs:
+        g_query, g_pool, g_rung = _search_one(
+            [gene], cancer_type, gene_splice, sort, _SECTION_SIZE * 2
+        )
+        if g_pool:
+            per_gene.append(g_pool)
+            worst_rung = max(worst_rung, g_rung)
+    merged: list[str] = []
+    seen: set[str] = set(pool)
+    merged.extend(pool)
+    for i in range(max((len(p) for p in per_gene), default=0)):
+        for gene_pool in per_gene:
+            if i < len(gene_pool) and gene_pool[i] not in seen:
+                seen.add(gene_pool[i])
+                merged.append(gene_pool[i])
+    return query, merged, worst_rung, True
+
+
+def _scope_label(rung: int, cancer_type: str | None) -> str:
+    """Describe the clauses actually in the query.
+
+    Rung 0 still drops the cancer clause when the type is a study-level
+    placeholder, so the rung alone would claim a filter that was never
+    applied. Report what ran, not what was intended.
+    """
+    has_cancer = bool(cancer_terms(cancer_type))
+    if rung == 0:
+        if has_cancer:
+            return "gene + cancer type + mechanism"
+        return "gene + mechanism (no sample-level cancer type on this study)"
+    if rung == 1:
+        return "gene + mechanism (cancer type dropped: pool too thin)"
+    return "gene + cancer type (mechanism dropped: pool too thin)"
+
+
+def pubmed_sections(
+    variants: list,
+    cancer_type: str | None,
+) -> dict:
+    """Two literature sections for one sample.
+
+    latest: context genes, cancer type and mechanism, sorted by date.
+    cited:  the same search's relevance pool, re-ranked by citation count.
+
+    The genes are OR-ed context; specificity comes from the cancer-type and
+    mechanism clauses being AND-ed. No gene is singled out.
+    """
+    gene_specs = context_genes(variants)
+    genes = [g for g, _ in gene_specs]
+    query, pool, rung, fanned = _search_genes(gene_specs, cancer_type, "relevance")
+    if not query or not pool:
+        return {
+            "genes": genes,
+            "scope": None,
+            "latest": [],
+            "cited": _fallback_papers(),
+            "pubmed_url": _pubmed_url(query) if query else "",
+        }
+
+    _, latest_pool, _, _ = _search_genes(gene_specs, cancer_type, "pub_date")
+    latest_ids = latest_pool[:_SECTION_SIZE]
+    # One iCite call covering both sections, so the recent papers carry a
+    # citation count too (usually 0) instead of rendering as unknown.
+    metrics = _icite_metrics(list(dict.fromkeys(pool + latest_ids)))
+    seen = set(latest_ids)
+    cited_ids = rank_most_cited([p for p in pool if p not in seen], metrics)
+
+    def hydrate(ids: list[str], section: str) -> list[dict]:
+        papers = _esummary_pubmed(ids) or []
+        for paper in papers:
+            m = metrics.get(str(paper.get("pmid")), {})
+            paper["section"] = section
+            paper["citation_count"] = m.get("citation_count")
+            paper["rcr"] = m.get("relative_citation_ratio")
+        return papers
+
+    scope = _scope_label(rung, cancer_type)
+    if fanned:
+        scope += "; searched per gene"
+    return {
+        "genes": genes,
+        "scope": scope,
+        "latest": hydrate(latest_ids, "latest"),
+        "cited": hydrate(cited_ids, "cited"),
+        "pubmed_url": _pubmed_url(query),
+    }
+
+
 def _pubmed_search_and_summarize(
     genes: list[str],
     cancer_type: str | None,
     message: str = "",
 ) -> tuple[str, str, list[dict]]:
-    """Stage 1: Boolean query + esearch/esummary with deterministic fallback."""
+    """Back-compat wrapper: flat paper list for callers not yet sectioned."""
     query = _build_pubmed_query(genes, cancer_type, message)
     pmids = _esearch_pubmed(query)
     papers: list[dict] | None = None
@@ -823,22 +1206,27 @@ def _fallback_reply(request: ChatRequest) -> dict:
             + _rich_sample_brief(study, request.cancer_type, request.case_id, genes)
         )
     elif action == "query_pubmed":
-        query, pubmed_url, papers = _pubmed_search_and_summarize(
-            genes, request.cancer_type, request.message
-        )
-        cited = "; ".join(f"{p['title']} (PMID {p['pmid']})" for p in papers)
+        sections = pubmed_sections(request.variants, request.cancer_type)
+        papers = list(sections["latest"]) + list(sections["cited"])
+        gene_list = ", ".join(sections.get("genes") or []) or "no scored genes"
+        scope = sections.get("scope")
         text = (
-            f"PubMed Stage 1 for {study} [{', '.join(genes)}]: "
-            f"warning-free Boolean query `{query}`. "
-            f"Top papers: {cited}. Open: {pubmed_url}"
+            f"PubMed literature for {study} [{gene_list}]: "
+            f"{len(sections['latest'])} most recent and "
+            f"{len(sections['cited'])} most cited paper(s)."
         )
+        if scope:
+            text += f" Scope: {scope}."
         return {
             "reply": text,
             "action_type": action,
             "source": "fallback",
-            "query": query,
-            "pubmed_url": pubmed_url,
+            "genes": sections.get("genes"),
+            "scope": scope,
+            "pubmed_url": sections["pubmed_url"],
             "papers": papers,
+            "latest": sections["latest"],
+            "cited": sections["cited"],
         }
     elif action in (
         "fail_kinetics",
@@ -853,22 +1241,27 @@ def _fallback_reply(request: ChatRequest) -> dict:
     elif request.ingested_pmids:
         return _grounded_followup_reply(request)
     elif not action and _looks_like_literature(request.message):
-        query, pubmed_url, papers = _pubmed_search_and_summarize(
-            genes, request.cancer_type, request.message
-        )
-        cited = "; ".join(f"{p['title']} (PMID {p['pmid']})" for p in papers)
+        sections = pubmed_sections(request.variants, request.cancer_type)
+        papers = list(sections["latest"]) + list(sections["cited"])
+        gene_list = ", ".join(sections.get("genes") or []) or "no scored genes"
+        scope = sections.get("scope")
         text = (
-            f"Free-text literature search for {study} [{', '.join(genes)}]: "
-            f"warning-free Boolean query `{query}`. "
-            f"Top papers: {cited}. Open: {pubmed_url}"
+            f"Free-text literature search for {study} [{gene_list}]: "
+            f"{len(sections['latest'])} most recent and "
+            f"{len(sections['cited'])} most cited paper(s)."
         )
+        if scope:
+            text += f" Scope: {scope}."
         return {
             "reply": text,
             "action_type": None,
             "source": "fallback",
-            "query": query,
-            "pubmed_url": pubmed_url,
+            "genes": sections.get("genes"),
+            "scope": scope,
+            "pubmed_url": sections["pubmed_url"],
             "papers": papers,
+            "latest": sections["latest"],
+            "cited": sections["cited"],
         }
     else:
         text = (
