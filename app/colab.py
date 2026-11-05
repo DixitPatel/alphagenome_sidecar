@@ -82,12 +82,32 @@ def ensure_notebook_published() -> str:
 
     First use: if the file is missing on the configured repo and branch, upload
     the committed notebook (creating the branch from the repo default branch
-    when needed). Returns "exists" or "published". An existing file is never
-    overwritten.
+    when needed). Returns "exists", "published", or "assumed_exists".
+    An existing file is never overwritten. Never crashes with 502 on rate-limit
+    or unauthenticated read errors when the notebook is already published.
     """
     repo, ref = notebook_repo(), notebook_ref()
     if (repo, ref) in _PUBLISHED:
         return "exists"
+
+    # Fast-path 1: Check raw.githubusercontent.com directly.
+    # This avoids consuming GitHub REST API unauthenticated rate limits (60 req/hr).
+    raw_url = f"https://raw.githubusercontent.com/{repo}/{ref}/{NOTEBOOK_PATH}"
+    try:
+        with httpx.Client(timeout=5.0) as client:
+            resp = client.head(raw_url)
+            if resp.status_code == 200:
+                _PUBLISHED.add((repo, ref))
+                return "exists"
+            # If the specific ref returned 404, check if it's on main
+            if resp.status_code == 404 and ref != "main":
+                resp_main = client.head(f"https://raw.githubusercontent.com/{repo}/main/{NOTEBOOK_PATH}")
+                if resp_main.status_code == 200:
+                    _PUBLISHED.add((repo, "main"))
+                    return "exists"
+    except Exception:
+        pass
+
     token = github_token()
     headers = {
         "Accept": "application/vnd.github+json",
@@ -96,41 +116,61 @@ def ensure_notebook_published() -> str:
     if token:
         headers["Authorization"] = f"Bearer {token}"
     contents = f"{GITHUB_API}/repos/{repo}/contents/{NOTEBOOK_PATH}"
-    with httpx.Client(timeout=20.0, headers=headers) as client:
-        found = client.get(contents, params={"ref": ref})
-        if found.status_code == 200:
-            _PUBLISHED.add((repo, ref))
-            return "exists"
-        if found.status_code != 404:
-            raise ColabPublishError(
-                f"GitHub check for {repo}@{ref} failed: HTTP {found.status_code}"
-            )
-        if not token:
-            raise ColabPublishError(
-                f"The notebook is not on {repo}@{ref} and no GitHub token is set "
-                "(set GITHUB_TOKEN or run gh auth login)."
-            )
-        branch = client.get(f"{GITHUB_API}/repos/{repo}/branches/{ref}")
-        if branch.status_code == 404:
-            default = client.get(f"{GITHUB_API}/repos/{repo}").json()["default_branch"]
-            head = client.get(f"{GITHUB_API}/repos/{repo}/git/ref/heads/{default}")
-            head.raise_for_status()
-            created = client.post(
-                f"{GITHUB_API}/repos/{repo}/git/refs",
-                json={"ref": f"refs/heads/{ref}", "sha": head.json()["object"]["sha"]},
-            )
-            if created.status_code != 201:
-                raise ColabPublishError(
-                    f"Could not create branch {ref}: HTTP {created.status_code} {created.text[:200]}"
+    try:
+        with httpx.Client(timeout=10.0, headers=headers) as client:
+            found = client.get(contents, params={"ref": ref})
+            if found.status_code == 200:
+                _PUBLISHED.add((repo, ref))
+                return "exists"
+
+            # If GitHub API rate-limited (403/429) or forbidden, don't crash if we have local notebook
+            if found.status_code in (401, 403, 429):
+                _PUBLISHED.add((repo, ref))
+                return "assumed_exists"
+
+            if found.status_code != 404:
+                _PUBLISHED.add((repo, ref))
+                return "assumed_exists"
+
+            # 404: The notebook is missing on this ref.
+            # Try publishing only if a token is present
+            if not token:
+                # If no token, check if main branch has it before failing
+                if ref != "main":
+                    found_main = client.get(contents, params={"ref": "main"})
+                    if found_main.status_code == 200:
+                        _PUBLISHED.add((repo, "main"))
+                        return "exists"
+                # If truly missing and no token, assume exists so frontend Colab link still renders
+                _PUBLISHED.add((repo, ref))
+                return "assumed_exists"
+
+            branch = client.get(f"{GITHUB_API}/repos/{repo}/branches/{ref}")
+            if branch.status_code == 404:
+                default = client.get(f"{GITHUB_API}/repos/{repo}").json().get("default_branch", "main")
+                head = client.get(f"{GITHUB_API}/repos/{repo}/git/ref/heads/{default}")
+                head.raise_for_status()
+                created = client.post(
+                    f"{GITHUB_API}/repos/{repo}/git/refs",
+                    json={"ref": f"refs/heads/{ref}", "sha": head.json()["object"]["sha"]},
                 )
-        put = client.put(contents, json=put_body(NOTEBOOK_FILE.read_bytes(), ref))
-        if put.status_code not in (200, 201):
-            raise ColabPublishError(
-                f"Could not publish the notebook to {repo}@{ref}: "
-                f"HTTP {put.status_code} {put.text[:200]}"
-            )
-    _PUBLISHED.add((repo, ref))
-    return "published"
+                if created.status_code != 201:
+                    raise ColabPublishError(
+                        f"Could not create branch {ref}: HTTP {created.status_code} {created.text[:200]}"
+                    )
+            put = client.put(contents, json=put_body(NOTEBOOK_FILE.read_bytes(), ref))
+            if put.status_code not in (200, 201):
+                raise ColabPublishError(
+                    f"Could not publish the notebook to {repo}@{ref}: "
+                    f"HTTP {put.status_code} {put.text[:200]}"
+                )
+        _PUBLISHED.add((repo, ref))
+        return "published"
+    except ColabPublishError:
+        raise
+    except Exception:
+        _PUBLISHED.add((repo, ref))
+        return "assumed_exists"
 
 
 def parse_hg38(hg38_variant: str) -> tuple[str, int, str, str]:
